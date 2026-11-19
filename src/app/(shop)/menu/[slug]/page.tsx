@@ -67,7 +67,13 @@ export default async function ProductPage({ params }: { params: Params }) {
                 allowDuplicate: p.allowDuplicateVariants,
                 available,
                 maxQty: p.trackStock ? Math.max(0, p.stock ?? 0) : 999,
-                variants: p.packageOptions.map((o) => ({ id: o.variant.id, name: o.variant.name, max: o.maxPerPackage })),
+                variants: p.packageOptions.map((o) => ({
+                  id: o.variant.id,
+                  name: o.variant.name,
+                  max: o.maxPerPackage,
+                  price: o.variant.packagePrice ?? 0,
+                })),
+
               }}
             />
           </div>
