@@ -207,20 +207,23 @@ export async function priceCart(
             (option) => option.variant.packagePrice
           );
 
-          if (
-            selectedPrices.some(
-              (price) =>
-                price == null ||
-                !Number.isInteger(price) ||
-                price <= 0
-            )
-          ) {
+          const hasInvalidPrice = selectedPrices.some(
+            (price) =>
+              price == null ||
+              !Number.isInteger(price) ||
+              price <= 0
+          );
+          if (hasInvalidPrice) {
             error = error ?? "Harga varian paket belum diatur.";
           } else {
-            unitPrice = selectedPrices.reduce(
-              (total, price) => total + price!,
-              0
-            );
+            const validPrices = selectedPrices.filter(
+              (price): price is number => price != null
+          );
+
+  unitPrice = validPrices.reduce(
+    (total, price) => total + price,
+    0
+  );
           }
         }
       }
