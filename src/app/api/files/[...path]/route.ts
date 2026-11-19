@@ -14,7 +14,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ path: s
   const key = `${bucket}/${name}`;
 
 if (bucket !== "products" && bucket !== "site") {
-    if (bucket !== "proofs") return new Response("Not found", { status: 404 });
+    if (bucket !== "products" && bucket !== "site") {
+  if (bucket !== "proofs") {
+    return new Response("Not found", { status: 404 });
+  }
     // Bukti transfer bersifat privat: hanya admin atau pemilik pesanan
     const admin = await adminOrNull();
     if (!admin) {
