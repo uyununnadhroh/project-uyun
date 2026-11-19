@@ -13,7 +13,7 @@ import { extractFromText } from "./ocr-parse";
  * keputusan akhir selalu dilakukan admin dengan mengecek mutasi rekening.
  */
 
-const TESSDATA = path.resolve(process.cwd(), process.env.STORAGE_DIR || "./storage", "tessdata");
+const TESSDATA = path.join(os.tmpdir(), "hakuu-tessdata");
 
 async function ensureLangData() {
   await fs.mkdir(TESSDATA, { recursive: true });
