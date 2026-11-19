@@ -11,7 +11,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ path: s
   const [bucket, name] = path as [Bucket, string];
   const key = `${bucket}/${name}`;
 
-  if (!PUBLIC_BUCKETS.includes(bucket)) {
+ if (!(PUBLIC_BUCKETS as readonly string[]).includes(bucket)) {
     if (bucket !== "proofs") return new Response("Not found", { status: 404 });
     // Bukti transfer bersifat privat: hanya admin atau pemilik pesanan
     const admin = await adminOrNull();
