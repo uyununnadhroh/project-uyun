@@ -1,5 +1,6 @@
-// Hakuu Bakery — skema database relasional (PostgreSQL)
-// Semua nominal uang disimpan dalam Rupiah utuh (Int), tanpa desimal.
+
+ // Hakuu Bakery — skema database relasional (PostgreSQL)
+ // Semua nominal uang disimpan dalam Rupiah utuh (Int), tanpa desimal.
 
 generator client {
   provider = "prisma-client-js"
@@ -33,33 +34,33 @@ enum PaymentMethod {
 }
 
 enum PaymentStatus {
-  UNPAID // Belum Dibayar
-  WAITING_VERIFICATION // Menunggu Verifikasi
-  REJECTED // Bukti Ditolak (customer dapat unggah ulang)
-  PAID // Lunas
-  VOID // Dibatalkan (pesanan batal sebelum lunas)
-  REFUNDED // Dikembalikan (pesanan batal setelah lunas)
+  UNPAID
+  WAITING_VERIFICATION
+  REJECTED
+  PAID
+  VOID
+  REFUNDED
 }
 
 enum OrderStatus {
-  PENDING_CONFIRMATION // Menunggu Konfirmasi
-  AWAITING_PAYMENT // Menunggu Pembayaran
-  AWAITING_VERIFICATION // Menunggu Verifikasi Pembayaran
-  PAYMENT_CONFIRMED // Pembayaran Dikonfirmasi
-  SCHEDULED // Masuk Jadwal Produksi
-  IN_PRODUCTION // Sedang Diproduksi
-  PACKING // Packing
-  READY // Siap Diambil / Siap Diantar
-  OUT_FOR_DELIVERY // Dalam Pengiriman
-  COMPLETED // Selesai
-  CANCELLED // Dibatalkan
+  PENDING_CONFIRMATION
+  AWAITING_PAYMENT
+  AWAITING_VERIFICATION
+  PAYMENT_CONFIRMED
+  SCHEDULED
+  IN_PRODUCTION
+  PACKING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
 }
 
 enum OcrStatus {
-  PENDING // OCR sedang/akan diproses
-  MATCH // Nominal terbaca sama dengan total
-  NEEDS_REVIEW // Perlu Pemeriksaan (nominal beda / tidak terbaca)
-  FAILED // OCR gagal dijalankan
+  PENDING
+  MATCH
+  NEEDS_REVIEW
+  FAILED
 }
 
 enum ProofReviewStatus {
@@ -81,10 +82,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  statusChanges  OrderStatusHistory[]
-  reviewedProofs PaymentProof[]
+  statusChanges   OrderStatusHistory[]
+  reviewedProofs  PaymentProof[]
   verifiedPayments Payment[]
-  auditLogs      AuditLog[]
+  auditLogs       AuditLog[]
 
   @@map("users")
 }
@@ -110,21 +111,23 @@ model Product {
   name          String
   slug          String      @unique
   description   String      @default("")
-  information   String?     // komposisi, berat, daya tahan, alergen, dsb.
-  price         Int         // harga normal
-  discountPrice Int?        // harga diskon (opsional, harus < price)
+  information   String?
+  price         Int
+  discountPrice Int?
   type          ProductType @default(REGULAR)
-  isAvailable   Boolean     @default(true)  // status ketersediaan manual
-  trackStock    Boolean     @default(false) // gunakan sistem stok?
-  stock         Int?        // stok tersisa (hanya bila trackStock)
-  isPublished   Boolean     @default(true)  // aktif / nonaktif di katalog
-  isFeatured    Boolean     @default(false) // tampil di Best Seller bila data penjualan belum cukup
+  isAvailable   Boolean     @default(true)
+  trackStock    Boolean     @default(false)
+  stock         Int?
+  isPublished   Boolean     @default(true)
+  isFeatured    Boolean     @default(false)
+
   // Konfigurasi paket (hanya untuk type = PACKAGE)
-  packageSize            Int?    // jumlah isi paket -> jumlah slot pilihan
-  allowDuplicateVariants Boolean @default(true) // boleh memilih varian yang sama berulang
-  deletedAt     DateTime?   // soft delete agar riwayat pesanan tetap utuh
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  packageSize            Int?
+  allowDuplicateVariants Boolean @default(true)
+
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   images         ProductImage[]
   packageOptions ProductPackageOption[]
@@ -147,30 +150,35 @@ model ProductImage {
   @@map("product_images")
 }
 
-// Master varian rasa (Cokelat, Keju, Strawberry, ...)
+// Master varian rasa
 model ProductVariant {
   id          String   @id @default(cuid())
   name        String   @unique
   description String?
+
+  // Harga khusus saat varian dipilih dalam menu paket.
+  // Tidak mengubah harga produk Ala Carte.
+  packagePrice Int?
+
   isActive    Boolean  @default(true)
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  packageOptions ProductPackageOption[]
+  packageOptions  ProductPackageOption[]
   orderSelections OrderItemVariant[]
 
   @@map("product_variants")
 }
 
-// Varian apa saja yang boleh dipilih pada sebuah paket
+// Varian yang boleh dipilih pada sebuah paket
 model ProductPackageOption {
-  id        String         @id @default(cuid())
-  productId String
-  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
-  variantId String
-  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  maxPerPackage Int?       // batas pemilihan varian ini per paket (null = mengikuti aturan duplikat)
+  id            String         @id @default(cuid())
+  productId     String
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId     String
+  variant       ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  maxPerPackage Int?
 
   @@unique([productId, variantId])
   @@map("product_package_options")
@@ -179,7 +187,7 @@ model ProductPackageOption {
 model Customer {
   id        String   @id @default(cuid())
   name      String
-  phone     String   @unique // dinormalisasi: 62xxxxxxxxxx
+  phone     String   @unique
   address   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -189,12 +197,12 @@ model Customer {
 }
 
 model Order {
-  id          String @id @default(cuid())
-  orderNumber String @unique
+  id          String  @id @default(cuid())
+  orderNumber String  @unique
   customerId  String
   customer    Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
-  // Snapshot data kontak saat transaksi (customer bisa mengubah nama/alamat di pesanan berikutnya)
+  // Snapshot kontak pelanggan saat transaksi
   customerName  String
   customerPhone String
 
@@ -202,19 +210,19 @@ model Order {
   deliveryAddress   String?
   addressLandmark   String?
   scheduledDate     DateTime @db.Date
-  scheduledTime     String   // "08:00 - 10:00"
+  scheduledTime     String
   notes             String?
 
-  subtotal    Int
-  deliveryFee Int @default(0)
-  total       Int
-  productionUnits Int @default(0) // jumlah pcs untuk kapasitas produksi
+  subtotal        Int
+  deliveryFee     Int      @default(0)
+  total           Int
+  productionUnits Int      @default(0)
 
   status       OrderStatus
   cancelReason String?
   cancelledAt  DateTime?
   completedAt  DateTime?
-  archivedAt   DateTime? // diarsipkan (soft delete) — selalu tercatat di audit_logs
+  archivedAt   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -235,6 +243,7 @@ model OrderItem {
   order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId   String?
   product     Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+
   // Snapshot produk saat transaksi
   productName String
   productType ProductType
@@ -250,33 +259,35 @@ model OrderItem {
   @@map("order_items")
 }
 
-// Varian yang dipilih customer pada setiap slot paket
+// Varian yang dipilih pelanggan pada setiap slot paket
 model OrderItemVariant {
   id          String          @id @default(cuid())
   orderItemId String
   orderItem   OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  slotNumber  Int             // 1..packageSize
+  slotNumber  Int
   variantId   String?
   variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
-  variantName String          // snapshot
+  variantName String
 
   @@unique([orderItemId, slotNumber])
   @@map("order_item_variants")
 }
 
 model Payment {
-  id       String        @id @default(cuid())
-  orderId  String        @unique
-  order    Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  method   PaymentMethod
-  amount   Int
-  status   PaymentStatus @default(UNPAID)
-  // Rekening tujuan (transfer) — disalin sebagai snapshot
+  id      String        @id @default(cuid())
+  orderId String        @unique
+  order   Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  method  PaymentMethod
+  amount  Int
+  status  PaymentStatus @default(UNPAID)
+
+  // Rekening tujuan disimpan sebagai snapshot
   bankAccountId     String?
   bankAccount       BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
   bankName          String?
   bankAccountNumber String?
   bankAccountHolder String?
+
   deadline     DateTime?
   paidAt       DateTime?
   verifiedById String?
@@ -295,10 +306,11 @@ model PaymentProof {
   id        String   @id @default(cuid())
   paymentId String
   payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  filePath  String   // path pada storage privat
+  filePath  String
   mimeType  String
   fileSize  Int
-  // Hasil OCR — hanya alat bantu, BUKAN penentu keaslian
+
+  // OCR hanya sebagai alat bantu
   ocrStatus     OcrStatus @default(PENDING)
   ocrText       String?
   ocrAmount     Int?
@@ -306,7 +318,7 @@ model PaymentProof {
   ocrSenderName String?
   ocrConfidence Float?
   ocrNote       String?
-  // Keputusan admin
+
   reviewStatus    ProofReviewStatus @default(PENDING)
   rejectionReason String?
   reviewedById    String?
@@ -340,7 +352,7 @@ model OrderStatusHistory {
   fromStatus  OrderStatus?
   toStatus    OrderStatus
   note        String?
-  actor       String       @default("system") // system | customer | admin
+  actor       String       @default("system")
   changedById String?
   changedBy   User?        @relation(fields: [changedById], references: [id], onDelete: SetNull)
   createdAt   DateTime     @default(now())
@@ -349,12 +361,12 @@ model OrderStatusHistory {
   @@map("order_status_histories")
 }
 
-// Kapasitas produksi per tanggal (override dari pengaturan default)
+// Kapasitas produksi per tanggal
 model DailyProductionCapacity {
   id        String   @id @default(cuid())
   date      DateTime @unique @db.Date
-  capacity  Int      // maksimal pcs produk yang dapat diproduksi
-  isClosed  Boolean  @default(false) // toko libur / tidak menerima pesanan
+  capacity  Int
+  isClosed  Boolean  @default(false)
   note      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -370,7 +382,7 @@ model Setting {
   @@map("settings")
 }
 
-// Jejak audit untuk tindakan sensitif (arsip pesanan, perubahan pembayaran, dsb.)
+// Jejak audit untuk tindakan sensitif
 model AuditLog {
   id         String   @id @default(cuid())
   userId     String?
