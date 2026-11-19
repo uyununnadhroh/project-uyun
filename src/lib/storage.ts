@@ -1,88 +1,152 @@
+
 import "server-only";
-import { promises as fs } from "fs";
-import path from "path";
-import crypto from "crypto";
-import sharp, { type Metadata as SharpMeta } from "sharp";
-import { MAX_UPLOAD_BYTES } from "./constants";
+import { randomUUID } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 
-/**
- * Penyimpanan file lokal. Struktur:
- *   storage/products/*.webp  -> publik, disajikan lewat /api/files/products/...
- *   storage/site/*.webp      -> publik (hero, dsb.)
- *   storage/proofs/*.jpg     -> PRIVAT, hanya admin / pemilik pesanan
- * Untuk produksi, modul ini dapat diganti ke Supabase Storage / S3 tanpa mengubah pemanggilnya.
- */
-export type Bucket = "products" | "site" | "proofs";
-export const PUBLIC_BUCKETS: Bucket[] = ["products", "site"];
-
-const ROOT = path.resolve(process.cwd(), process.env.STORAGE_DIR || "./storage");
-
-export class UploadError extends Error {}
-
-const FORMAT_TO_MIME: Record<string, string> = { jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
-
-/** Validasi berdasarkan isi file (magic bytes via sharp), bukan sekadar ekstensi / header browser. */
-async function inspect(file: File, allowedMimes: string[]) {
-  if (!file || typeof file.arrayBuffer !== "function") throw new UploadError("File tidak ditemukan.");
-  if (file.size === 0) throw new UploadError("File kosong.");
-  if (file.size > MAX_UPLOAD_BYTES) throw new UploadError(`Ukuran file maksimal ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`);
-  const buf = Buffer.from(await file.arrayBuffer());
-  let meta: SharpMeta;
-  try {
-    meta = await sharp(buf).metadata();
-  } catch {
-    throw new UploadError("File bukan gambar yang valid.");
+export class UploadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UploadError";
   }
-  const mime = meta.format ? FORMAT_TO_MIME[meta.format] : undefined;
-  if (!mime || !allowedMimes.includes(mime)) {
-    throw new UploadError(`Format tidak didukung. Gunakan ${allowedMimes.map((m) => m.split("/")[1].toUpperCase()).join(", ")}.`);
+}
+
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MAX_FILES = 8;
+const BUCKET = "product-images";
+
+type AllowedImageTypes = readonly string[] | string[];
+
+function getSupabase() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new UploadError(
+      "Konfigurasi Supabase Storage belum lengkap. Periksa SUPABASE_URL dan SUPABASE_SERVICE_ROLE_KEY di Vercel."
+    );
   }
-  if ((meta.width ?? 0) < 50 || (meta.height ?? 0) < 50) throw new UploadError("Resolusi gambar terlalu kecil.");
-  return { buf, mime };
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 }
 
-function randomName(ext: string) {
-  return `${Date.now().toString(36)}-${crypto.randomBytes(8).toString("hex")}.${ext}`;
+function safeFolder(folder: string) {
+  const normalized = folder.replace(/^\/+|\/+$/g, "");
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(normalized)) {
+    throw new UploadError("Folder penyimpanan gambar tidak valid.");
+  }
+
+  return normalized;
 }
 
-async function write(bucket: Bucket, name: string, data: Buffer) {
-  const dir = path.join(ROOT, bucket);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, name), data);
-  return `${bucket}/${name}`;
-}
-
-/** Simpan foto produk/site: di-encode ulang ke WebP (membuang metadata EXIF & payload tersembunyi). */
-export async function savePublicImage(file: File, bucket: "products" | "site", allowed: string[]) {
-  const { buf } = await inspect(file, allowed);
-  const out = await sharp(buf).rotate().resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
-  const key = await write(bucket, randomName("webp"), out);
-  return { url: `/api/files/${key}`, key };
-}
-
-/** Simpan bukti transfer ke storage privat (JPEG, resolusi cukup untuk OCR). */
-export async function savePaymentProof(file: File, allowed: string[]) {
-  const { buf } = await inspect(file, allowed);
-  const out = await sharp(buf).rotate().resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
-  const key = await write("proofs", randomName("jpg"), out);
-  return { key, mimeType: "image/jpeg", size: out.length };
-}
-
-export function resolveKey(key: string) {
-  const full = path.resolve(ROOT, key);
-  if (!full.startsWith(ROOT + path.sep)) throw new UploadError("Path tidak valid.");
-  return full;
-}
-
-export async function readFile(key: string) {
-  return fs.readFile(resolveKey(key));
-}
-
-export async function deleteByUrl(url: string | null | undefined) {
-  if (!url || !url.startsWith("/api/files/")) return;
+function getPublicObjectPath(url: string): string | null {
   try {
-    await fs.unlink(resolveKey(url.replace("/api/files/", "")));
+    const parsed = new URL(url);
+    const base = process.env.SUPABASE_URL;
+
+    if (!base || parsed.origin !== new URL(base).origin) {
+      return null;
+    }
+
+    const prefix = `/storage/v1/object/public/${BUCKET}/`;
+
+    if (!parsed.pathname.startsWith(prefix)) {
+      return null;
+    }
+
+    const path = parsed.pathname.slice(prefix.length);
+
+    if (!path || path.split("/").some((part) => part === "..")) {
+      return null;
+    }
+
+    return path;
   } catch {
-    /* abaikan */
+    return null;
+  }
+}
+
+export async function savePublicImage(
+  file: File,
+  folder: string,
+  allowedTypes: AllowedImageTypes
+): Promise<{ url: string }> {
+  if (!(file instanceof File) || file.size <= 0) {
+    throw new UploadError("File gambar tidak valid.");
+  }
+
+  if (!allowedTypes.includes(file.type)) {
+    throw new UploadError("Format gambar harus JPG, PNG, atau WEBP.");
+  }
+
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new UploadError("Ukuran maksimal gambar adalah 5 MB.");
+  }
+
+  if (file.size > 0 && !file.name) {
+    throw new UploadError("Nama file gambar tidak valid.");
+  }
+
+  const targetFolder = safeFolder(folder);
+  const extensionByType: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+  };
+
+  const extension = extensionByType[file.type];
+
+  if (!extension) {
+    throw new UploadError("Format gambar tidak didukung.");
+  }
+
+  const path = `${targetFolder}/${randomUUID()}.${extension}`;
+  const supabase = getSupabase();
+  const bytes = Buffer.from(await file.arrayBuffer());
+
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, bytes, {
+      contentType: file.type,
+      cacheControl: "31536000",
+      upsert: false,
+    });
+
+  if (error) {
+    console.error("Supabase Storage upload error:", error.message);
+    throw new UploadError(
+      "Gagal mengunggah gambar. Periksa konfigurasi dan izin Supabase Storage."
+    );
+  }
+
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+
+  if (!data.publicUrl) {
+    await supabase.storage.from(BUCKET).remove([path]);
+    throw new UploadError("URL gambar gagal dibuat.");
+  }
+
+  return { url: data.publicUrl };
+}
+
+export async function deleteByUrl(url: string): Promise<void> {
+  if (!url) return;
+
+  const path = getPublicObjectPath(url);
+
+  // Jangan menghapus URL eksternal atau file yang bukan milik bucket ini.
+  if (!path) return;
+
+  const supabase = getSupabase();
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+
+  if (error) {
+    console.error("Supabase Storage delete error:", error.message);
   }
 }
