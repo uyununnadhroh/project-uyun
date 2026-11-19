@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { adminOrNull } from "@/lib/auth";
 import { getOrderAccessList } from "@/lib/order-access";
-import { PUBLIC_BUCKETS, readFile, type Bucket } from "@/lib/storage";
+import { readFile, type Bucket } from "@/lib/storage";
 
 const TYPES: Record<string, string> = { webp: "image/webp", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png" };
 
