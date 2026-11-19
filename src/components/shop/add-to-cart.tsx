@@ -307,7 +307,7 @@ export function AddToCart({ product }: Props) {
                         value={v.id}
                         disabled={optionDisabled(i, v)}
                       >
-                        {v.name} — {formatRupiah(v.price)}
+                        {v.name}
                         {v.max ? ` (maks ${v.max})` : ""}
                       </option>
                     ))}
