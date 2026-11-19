@@ -11,15 +11,11 @@ export class UploadError extends Error {
 }
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const MAX_FILES = 8;
-
-// Nama bucket Supabase untuk gambar produk dan gambar situs.
 const STORAGE_BUCKET = "product-images";
+const PROOF_BUCKET = "payment-proofs";
 
-// Nama folder logis yang boleh diakses secara publik melalui route files.
 export const PUBLIC_BUCKETS = ["products", "site"] as const;
 
-// Folder bukti transfer harus tetap privat.
 export type Bucket = (typeof PUBLIC_BUCKETS)[number] | "proofs";
 
 type AllowedImageTypes = readonly string[];
@@ -59,8 +55,7 @@ function safeStorageKey(key: string): boolean {
   return (
     parts.length === 2 &&
     ["products", "site", "proofs"].includes(parts[0]) &&
-    /^[a-zA-Z0-9_-]+\.(webp|jpg|jpeg|png)$/i.test(parts[1]) &&
-    !parts.some((part) => part === "." || part === "..")
+    /^[a-zA-Z0-9_-]+\.(webp|jpg|jpeg|png)$/i.test(parts[1])
   );
 }
 
@@ -86,7 +81,9 @@ function getPublicObjectPath(url: string): string | null {
 
     if (
       !path ||
-      path.split("/").some((part) => part === "." || part === "..")
+      path.split("/").some(
+        (part) => part === "." || part === ".."
+      )
     ) {
       return null;
     }
@@ -97,13 +94,7 @@ function getPublicObjectPath(url: string): string | null {
   }
 }
 
-/**
- * Membaca file berdasarkan key folder/nama-file.
- *
- * Catatan:
- * - products dan site berada di bucket product-images.
- * - proofs berada di bucket privat payment-proofs.
- */
+/** Membaca gambar produk, gambar situs, atau bukti transfer. */
 export async function readFile(key: string): Promise<Buffer> {
   if (!safeStorageKey(key)) {
     throw new Error("Lokasi file tidak valid.");
@@ -111,21 +102,24 @@ export async function readFile(key: string): Promise<Buffer> {
 
   const [folder] = key.split("/");
   const bucketName =
-    folder === "proofs" ? "payment-proofs" : STORAGE_BUCKET;
+    folder === "proofs" ? PROOF_BUCKET : STORAGE_BUCKET;
 
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase.storage
-    .from(bucketName)
+  const { data, error } = await getSupabase()
+    .storage.from(bucketName)
     .download(key);
 
   if (error || !data) {
-    throw new Error("File tidak ditemukan di penyimpanan.");
+    console.error(
+      "Supabase Storage read error:",
+      error?.message
+    );
+    throw new Error("File tidak ditemukan.");
   }
 
   return Buffer.from(await data.arrayBuffer());
 }
 
+/** Upload gambar produk atau gambar situs. */
 export async function savePublicImage(
   file: File,
   folder: string,
@@ -142,7 +136,9 @@ export async function savePublicImage(
   }
 
   if (file.size > MAX_UPLOAD_BYTES) {
-    throw new UploadError("Ukuran maksimal gambar adalah 5 MB.");
+    throw new UploadError(
+      "Ukuran maksimal gambar adalah 5 MB."
+    );
   }
 
   if (!file.name) {
@@ -151,8 +147,14 @@ export async function savePublicImage(
 
   const targetFolder = safeFolder(folder);
 
-  if (!PUBLIC_BUCKETS.includes(targetFolder as (typeof PUBLIC_BUCKETS)[number])) {
-    throw new UploadError("Folder upload gambar tidak diizinkan.");
+  if (
+    !PUBLIC_BUCKETS.includes(
+      targetFolder as (typeof PUBLIC_BUCKETS)[number]
+    )
+  ) {
+    throw new UploadError(
+      "Folder upload gambar tidak diizinkan."
+    );
   }
 
   const extensionByType: Record<string, string> = {
@@ -169,8 +171,8 @@ export async function savePublicImage(
 
   const filename = `${randomUUID()}.${extension}`;
   const path = `${targetFolder}/${filename}`;
-  const supabase = getSupabase();
   const bytes = Buffer.from(await file.arrayBuffer());
+  const supabase = getSupabase();
 
   const { error } = await supabase.storage
     .from(STORAGE_BUCKET)
@@ -185,7 +187,6 @@ export async function savePublicImage(
       "Supabase Storage upload error:",
       error.message
     );
-
     throw new UploadError(
       "Gagal mengunggah gambar. Periksa konfigurasi dan izin Supabase Storage."
     );
@@ -203,18 +204,88 @@ export async function savePublicImage(
   return { url: data.publicUrl };
 }
 
-export async function deleteByUrl(url: string): Promise<void> {
-  if (!url) return;
+/** Upload bukti transfer ke bucket privat. */
+export async function savePaymentProof(
+  file: File,
+  allowedTypes: AllowedImageTypes
+): Promise<{
+  key: string;
+  mimeType: string;
+  size: number;
+}> {
+  if (!(file instanceof File) || file.size <= 0) {
+    throw new UploadError(
+      "File bukti pembayaran tidak valid."
+    );
+  }
 
-  const path = getPublicObjectPath(url);
+  if (!allowedTypes.includes(file.type)) {
+    throw new UploadError(
+      "Format file bukti pembayaran tidak didukung."
+    );
+  }
 
-  // Jangan menghapus file eksternal atau file dari bucket lain.
-  if (!path) return;
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new UploadError(
+      "Ukuran maksimal bukti pembayaran adalah 5 MB."
+    );
+  }
 
+  const extensionByType: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+  };
+
+  const extension = extensionByType[file.type];
+
+  if (!extension) {
+    throw new UploadError(
+      "Bukti pembayaran harus berupa gambar JPG, PNG, atau WEBP."
+    );
+  }
+
+  const filename = `${randomUUID()}.${extension}`;
+  const key = `proofs/${filename}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
   const supabase = getSupabase();
 
   const { error } = await supabase.storage
-    .from(STORAGE_BUCKET)
+    .from(PROOF_BUCKET)
+    .upload(key, bytes, {
+      contentType: file.type,
+      cacheControl: "0",
+      upsert: false,
+    });
+
+  if (error) {
+    console.error(
+      "Supabase payment proof upload error:",
+      error.message
+    );
+    throw new UploadError(
+      "Gagal mengunggah bukti pembayaran. Silakan coba lagi."
+    );
+  }
+
+  return {
+    key,
+    mimeType: file.type,
+    size: file.size,
+  };
+}
+
+/** Menghapus gambar yang URL-nya berasal dari bucket gambar publik. */
+export async function deleteByUrl(
+  url: string
+): Promise<void> {
+  if (!url) return;
+
+  const path = getPublicObjectPath(url);
+  if (!path) return;
+
+  const { error } = await getSupabase()
+    .storage.from(STORAGE_BUCKET)
     .remove([path]);
 
   if (error) {
