@@ -1,0 +1,15 @@
+# PostgreSQL untuk development lokal: docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hakuu
+      POSTGRES_PASSWORD: hakuu
+      POSTGRES_DB: hakuu_bakery
+    ports:
+      - "5432:5432"
+    volumes:
+      - hakuu_pg:/var/lib/postgresql/data
+volumes:
+  hakuu_pg:
