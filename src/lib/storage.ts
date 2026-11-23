@@ -30,6 +30,23 @@ function getSupabase() {
     );
   }
 
+  try {
+    const parsedUrl = new URL(url);
+
+    if (
+      !["http:", "https:"].includes(parsedUrl.protocol) ||
+      parsedUrl.pathname !== "/" ||
+      parsedUrl.search ||
+      parsedUrl.hash
+    ) {
+      throw new Error("URL Supabase tidak valid.");
+    }
+  } catch {
+    throw new UploadError(
+      "SUPABASE_URL tidak valid. Gunakan URL project Supabase."
+    );
+  }
+
   return createClient(url, key, {
     auth: {
       persistSession: false,
@@ -43,7 +60,9 @@ function safeFolder(folder: string): string {
   const normalized = folder.replace(/^\/+|\/+$/g, "");
 
   if (!/^[a-zA-Z0-9_-]+$/.test(normalized)) {
-    throw new UploadError("Folder penyimpanan gambar tidak valid.");
+    throw new UploadError(
+      "Folder penyimpanan gambar tidak valid."
+    );
   }
 
   return normalized;
@@ -101,12 +120,32 @@ export async function readFile(key: string): Promise<Buffer> {
   }
 
   const [folder] = key.split("/");
-  const bucketName =
-    folder === "proofs" ? PROOF_BUCKET : STORAGE_BUCKET;
+  const isProof = folder === "proofs";
+  const bucketName = isProof
+    ? PROOF_BUCKET
+    : STORAGE_BUCKET;
 
-  const { data, error } = await getSupabase()
-    .storage.from(bucketName)
-    .download(key);
+  const supabase = getSupabase();
+
+  // Bukti baru disimpan langsung di root bucket payment-proofs.
+  const objectPath = isProof
+    ? key.slice("proofs/".length)
+    : key;
+
+  let { data, error } = await supabase.storage
+    .from(bucketName)
+    .download(objectPath);
+
+  // Coba lokasi lama jika bukti sebelumnya disimpan
+  // di dalam folder proofs pada bucket payment-proofs.
+  if ((error || !data) && isProof) {
+    const legacyResult = await supabase.storage
+      .from(bucketName)
+      .download(key);
+
+    data = legacyResult.data;
+    error = legacyResult.error;
+  }
 
   if (error || !data) {
     console.error(
@@ -142,7 +181,9 @@ export async function savePublicImage(
   }
 
   if (!file.name) {
-    throw new UploadError("Nama file gambar tidak valid.");
+    throw new UploadError(
+      "Nama file gambar tidak valid."
+    );
   }
 
   const targetFolder = safeFolder(folder);
@@ -166,7 +207,9 @@ export async function savePublicImage(
   const extension = extensionByType[file.type];
 
   if (!extension) {
-    throw new UploadError("Format gambar tidak didukung.");
+    throw new UploadError(
+      "Format gambar tidak didukung."
+    );
   }
 
   const filename = `${randomUUID()}.${extension}`;
@@ -197,14 +240,17 @@ export async function savePublicImage(
     .getPublicUrl(path);
 
   if (!data.publicUrl) {
-    await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+    await supabase.storage
+      .from(STORAGE_BUCKET)
+      .remove([path]);
+
     throw new UploadError("URL gambar gagal dibuat.");
   }
 
   return { url: data.publicUrl };
 }
 
-/** Upload bukti transfer ke bucket privat. */
+/** Upload bukti transfer ke bucket privat payment-proofs. */
 export async function savePaymentProof(
   file: File,
   allowedTypes: AllowedImageTypes
@@ -246,13 +292,17 @@ export async function savePaymentProof(
   }
 
   const filename = `${randomUUID()}.${extension}`;
+
+  // Referensi yang disimpan ke database.
   const key = `proofs/${filename}`;
+
   const bytes = Buffer.from(await file.arrayBuffer());
   const supabase = getSupabase();
 
+  // Path upload relatif terhadap bucket payment-proofs.
   const { error } = await supabase.storage
     .from(PROOF_BUCKET)
-    .upload(key, bytes, {
+    .upload(filename, bytes, {
       contentType: file.type,
       cacheControl: "0",
       upsert: false,
