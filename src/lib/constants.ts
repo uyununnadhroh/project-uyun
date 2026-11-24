@@ -114,6 +114,8 @@ export const ACTIVE_STATUSES: OrderStatus[] = [
   "OUT_FOR_DELIVERY",
 ];
 
-export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+// Sisakan ruang untuk multipart dan data form pada batas request standar Vercel.
+export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+export const MAX_UPLOAD_LABEL = "4 MiB";
 export const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 export const ALLOWED_PROOF_TYPES = ["image/jpeg", "image/png"];

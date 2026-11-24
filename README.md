@@ -2,7 +2,7 @@
 
 Sistem pemesanan roti online untuk UMKM **Hakuu Bakery**: katalog & pemesanan untuk customer (tanpa akun), dan dashboard admin untuk produk, pesanan, verifikasi pembayaran, kapasitas produksi, serta laporan penjualan.
 
-**Stack:** Next.js 15 (App Router, Server Actions) · TypeScript · Tailwind CSS v4 · PostgreSQL + Prisma · Tesseract.js (OCR) · Recharts · ExcelJS / jsPDF
+**Stack:** Next.js 15 (App Router, Server Actions) · TypeScript · Tailwind CSS v4 · PostgreSQL + Prisma · Supabase Storage · Tesseract.js (OCR) · Recharts · ExcelJS / jsPDF
 
 Dokumentasi lanjutan:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — analisis kebutuhan, arsitektur, ERD, flowchart pemesanan & pembayaran, aturan bisnis
@@ -11,17 +11,17 @@ Dokumentasi lanjutan:
 
 ## Menjalankan secara lokal
 
-Prasyarat: Node.js 20+ dan PostgreSQL 14+ (atau Docker).
+Prasyarat: Node.js 24.x dan PostgreSQL 14+ (atau Docker).
 
 ```bash
-npm install
+npm ci
 ```
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`: isi `AUTH_SECRET` (`openssl rand -hex 32`), `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+Edit `.env`: isi `AUTH_SECRET` (`openssl rand -hex 32`), `ADMIN_EMAIL`, `ADMIN_PASSWORD`, serta variabel Supabase Storage sesuai [konfigurasi deployment](docs/DEPLOYMENT.md).
 
 Jalankan PostgreSQL (lewati bila sudah punya):
 
@@ -77,13 +77,11 @@ src/lib/             logika bisnis: order-service, payment-service, ocr, reports
 npm run typecheck
 ```
 
-Test end-to-end (36 skenario: alur customer & admin, paket dinamis, cash, transfer + OCR + tolak/terima, kapasitas & race condition, stok, laporan, export, keamanan, responsive). Berjalan pada database terpisah `hakuu_bakery_test`, butuh `npm run build` terlebih dahulu dan paket `playwright` + Chromium:
+Test end-to-end mencakup katalog HP/desktop, produk biasa dan paket, pembayaran, batas upload, akses privat bukti, kapasitas, stok, dan laporan. Salin `.env.example` ke `.env.test` dan arahkan `DATABASE_URL` ke database PostgreSQL lokal yang sudah dibuat dengan nama berakhiran `_test`. Skrip mereset database uji dan mengunggah berkas ke project Supabase Storage khusus pengujian sesuai variabel di `.env.test`.
 
 ```bash
+npx playwright install chromium
 npm run build
-```
-
-```bash
 npm run test:e2e
 ```
 

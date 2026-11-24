@@ -5,7 +5,7 @@ import { Check, Copy, Clock, Upload, ImageIcon, X, PartyPopper, AlertTriangle, M
 import { toast } from "sonner";
 import type { CustomerOrder } from "@/lib/order-view";
 import type { OrderStatus } from "@prisma/client";
-import { ORDER_STATUS_TONE, PAYMENT_METHOD_LABEL, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_TONE, FULFILLMENT_LABEL, orderStatusLabel, ALLOWED_PROOF_TYPES, MAX_UPLOAD_BYTES } from "@/lib/constants";
+import { ORDER_STATUS_TONE, PAYMENT_METHOD_LABEL, PAYMENT_STATUS_LABEL, PAYMENT_STATUS_TONE, FULFILLMENT_LABEL, orderStatusLabel, ALLOWED_PROOF_TYPES, MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/lib/constants";
 import { cn, displayPhone, formatDateOnly, formatDateTime, formatRupiah } from "@/lib/utils";
 import { orderSummaryText, waLink } from "@/lib/whatsapp";
 import { Badge } from "@/components/ui/badge";
@@ -60,8 +60,11 @@ function ProofUploader({ orderNumber, onDone }: { orderNumber: string; onDone: (
   function pick(f: File | undefined) {
     setErr(null);
     if (!f) return;
+    setFile(null);
+    setPreview(null);
+    if (!f.size) return setErr("File kosong. Pilih gambar bukti transfer.");
     if (!ALLOWED_PROOF_TYPES.includes(f.type)) return setErr("Format harus JPG, JPEG, atau PNG.");
-    if (f.size > MAX_UPLOAD_BYTES) return setErr("Ukuran file maksimal 5 MB.");
+    if (f.size > MAX_UPLOAD_BYTES) return setErr(`Ukuran file maksimal ${MAX_UPLOAD_LABEL}.`);
     setFile(f);
     setPreview(URL.createObjectURL(f));
   }
@@ -73,14 +76,17 @@ function ProofUploader({ orderNumber, onDone }: { orderNumber: string; onDone: (
       const fd = new FormData();
       fd.append("file", file);
       const r = await fetch(`/api/orders/${orderNumber}/proof`, { method: "POST", body: fd });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error);
+      if (r.status === 413) throw new Error(`Ukuran file maksimal ${MAX_UPLOAD_LABEL}.`);
+      if (!r.ok) {
+        const result = await r.json().catch(() => null);
+        throw new Error(result?.error ?? "Bukti pembayaran gagal diunggah. Silakan coba lagi.");
+      }
       toast.success("Bukti pembayaran berhasil dikirim!", { description: "Admin akan memverifikasi pembayaranmu." });
       setFile(null);
       setPreview(null);
       onDone();
     } catch (e) {
-      setErr((e as Error).message || "Gagal mengunggah");
+      setErr(e instanceof TypeError ? "Koneksi gagal. Periksa jaringan lalu coba lagi." : (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -88,7 +94,7 @@ function ProofUploader({ orderNumber, onDone }: { orderNumber: string; onDone: (
 
   return (
     <div>
-      <input ref={input} type="file" accept="image/jpeg,image/png" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+      <input ref={input} type="file" accept="image/jpeg,image/png" className="hidden" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />
       {preview ? (
         <div className="relative overflow-hidden rounded-2xl border border-line bg-cream-100">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -108,10 +114,10 @@ function ProofUploader({ orderNumber, onDone }: { orderNumber: string; onDone: (
         >
           <ImageIcon className="h-8 w-8 text-caramel-dark" />
           <span className="text-sm font-semibold">Pilih / tarik gambar bukti transfer</span>
-          <span className="text-xs text-muted">JPG, JPEG, PNG · maks 5 MB</span>
+          <span className="text-xs text-muted">JPG, JPEG, PNG · maks {MAX_UPLOAD_LABEL}</span>
         </button>
       )}
-      {err && <p className="mt-2 text-xs font-medium text-red-600">{err}</p>}
+      {err && <p role="alert" className="mt-2 text-xs font-medium text-red-600">{err}</p>}
       <Button className="mt-3 w-full" size="lg" loading={busy} disabled={!file} onClick={send}>
         <Upload className="h-4.5 w-4.5" /> Kirim Bukti Pembayaran
       </Button>

@@ -8,12 +8,15 @@ import { deleteProduct, toggleProductField } from "@/app/admin/actions";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
+const toggleLabels = { isPublished: "Publikasi", isAvailable: "Tersedia", isFeatured: "Unggulan" };
+
 export function ProductToggle({ id, field, value }: { id: string; field: "isPublished" | "isAvailable" | "isFeatured"; value: boolean }) {
   const [v, setV] = useState(value);
   const [pending, start] = useTransition();
   return (
     <button
       role="switch"
+      aria-label={toggleLabels[field]}
       aria-checked={v}
       disabled={pending}
       onClick={() =>

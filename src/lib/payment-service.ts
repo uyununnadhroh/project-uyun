@@ -2,8 +2,7 @@ import "server-only";
 import { prisma } from "./db";
 import { OrderError } from "./order-service";
 import { getSettings } from "./settings";
-import { savePaymentProof } from "./storage";
-import { ALLOWED_PROOF_TYPES } from "./constants";
+import { deletePaymentProof, savePaymentProof } from "./storage";
 
 /** Customer mengunggah bukti transfer. */
 export async function submitPaymentProof(orderNumber: string, file: File) {
@@ -16,33 +15,49 @@ export async function submitPaymentProof(orderNumber: string, file: File) {
   if (order.payment.deadline && order.payment.deadline < new Date())
     throw new OrderError("Batas waktu pembayaran sudah terlewati. Hubungi Hakuu Bakery melalui WhatsApp.");
 
-  const saved = await savePaymentProof(file, ALLOWED_PROOF_TYPES);
-  const s = await getSettings();
+  const settings = await getSettings();
+  const saved = await savePaymentProof(file);
+  const paymentId = order.payment.id;
 
-  const proof = await prisma.$transaction(async (tx) => {
-    // Cegah unggah ganda bersamaan
-    const res = await tx.payment.updateMany({
-      where: { id: order.payment!.id, status: { in: ["UNPAID", "REJECTED"] } },
-      data: { status: "WAITING_VERIFICATION" },
+  try {
+    const proof = await prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const payment = await tx.payment.updateMany({
+        where: { id: paymentId, status: { in: ["UNPAID", "REJECTED"] }, OR: [{ deadline: null }, { deadline: { gte: now } }] },
+        data: { status: "WAITING_VERIFICATION" },
+      });
+      if (payment.count !== 1) throw new OrderError("Status atau batas waktu pembayaran sudah berubah. Muat ulang halaman.", undefined, 409);
+      const updatedOrder = await tx.order.updateMany({
+        where: { id: order.id, archivedAt: null, status: "AWAITING_PAYMENT" },
+        data: { status: "AWAITING_VERIFICATION" },
+      });
+      if (updatedOrder.count !== 1) throw new OrderError("Status pesanan sudah berubah. Muat ulang halaman.", undefined, 409);
+
+      const proof = await tx.paymentProof.create({
+        data: {
+          paymentId,
+          filePath: saved.key,
+          mimeType: saved.mimeType,
+          fileSize: saved.size,
+          ocrStatus: settings.ocrEnabled ? "PENDING" : "NEEDS_REVIEW",
+          ocrNote: settings.ocrEnabled ? null : "OCR dinonaktifkan. Periksa manual.",
+        },
+      });
+      await tx.orderStatusHistory.create({
+        data: { orderId: order.id, fromStatus: "AWAITING_PAYMENT", toStatus: "AWAITING_VERIFICATION", actor: "customer", note: "Customer mengunggah bukti transfer." },
+      });
+      return proof;
     });
-    if (res.count !== 1) throw new OrderError("Status pembayaran sudah berubah. Muat ulang halaman.", undefined, 409);
-    const p = await tx.paymentProof.create({
-      data: {
-        paymentId: order.payment!.id,
-        filePath: saved.key,
-        mimeType: saved.mimeType,
-        fileSize: saved.size,
-        ocrStatus: s.ocrEnabled ? "PENDING" : "NEEDS_REVIEW",
-        ocrNote: s.ocrEnabled ? null : "OCR dinonaktifkan. Periksa manual.",
-      },
-    });
-    await tx.order.update({ where: { id: order.id }, data: { status: "AWAITING_VERIFICATION" } });
-    await tx.orderStatusHistory.create({
-      data: { orderId: order.id, fromStatus: order.status, toStatus: "AWAITING_VERIFICATION", actor: "customer", note: "Customer mengunggah bukti transfer." },
-    });
-    return p;
-  });
-  return { proof, ocrEnabled: s.ocrEnabled };
+    return { proof, ocrEnabled: settings.ocrEnabled };
+  } catch (error) {
+    try {
+      const stored = await prisma.paymentProof.findFirst({ where: { filePath: saved.key }, select: { id: true } });
+      if (!stored) await deletePaymentProof(saved.key);
+    } catch {
+      console.error("[payment] gagal membersihkan bukti transfer yang belum terhubung");
+    }
+    throw error;
+  }
 }
 
 export async function approveProof(proofId: string, adminId: string) {

@@ -26,6 +26,7 @@ export function toCard(p: P, sold = 0): CardProduct {
     imageUrl: p.images[0]?.url ?? null,
     categoryName: p.category.name,
     inStock: inStock(p),
+    isFeatured: p.isFeatured,
     sold,
   };
 }
@@ -59,8 +60,8 @@ export async function getCatalog(opts: { q?: string; category?: string; sort?: s
 /** Best seller: berdasarkan data penjualan; bila belum ada penjualan gunakan produk unggulan pilihan admin. */
 export async function getBestSellers(limit = 4) {
   const [products, sold] = await Promise.all([prisma.product.findMany({ where: publicProductWhere, include }), soldCounts()]);
-  const cards = products.map((p) => ({ card: toCard(p, sold.get(p.id) ?? 0), featured: p.isFeatured }));
-  cards.sort((a, b) => (b.card.sold ?? 0) - (a.card.sold ?? 0) || Number(b.featured) - Number(a.featured));
-  const withSales = cards.filter((c) => (c.card.sold ?? 0) > 0 || c.featured);
-  return (withSales.length ? withSales : cards).slice(0, limit).map((c) => c.card);
+  const cards = products.map((p) => toCard(p, sold.get(p.id) ?? 0));
+  cards.sort((a, b) => (b.sold ?? 0) - (a.sold ?? 0) || Number(b.isFeatured) - Number(a.isFeatured));
+  const withSales = cards.filter((c) => (c.sold ?? 0) > 0 || c.isFeatured);
+  return (withSales.length ? withSales : cards).slice(0, limit);
 }

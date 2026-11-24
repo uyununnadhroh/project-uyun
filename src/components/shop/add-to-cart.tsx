@@ -8,13 +8,13 @@ import { toast } from "sonner";
 import { useCart } from "./cart-context";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { cn, formatRupiah } from "@/lib/utils";
+import { cn, formatRupiah, packageUnitPrice } from "@/lib/utils";
 
 type Variant = {
   id: string;
   name: string;
   max: number | null;
-  price: number;
+  price: number | null;
 };
 
 type Props = {
@@ -143,19 +143,8 @@ export function AddToCart({ product }: Props) {
   const complete = !isPackage || filled === product.packageSize;
   const maxQty = Math.max(1, product.maxQty);
 
-  // Harga paket dihitung dari seluruh varian yang dipilih.
-  // Untuk Ala Carte, harga tetap menggunakan product.price.
-  const selectedPackagePrice = useMemo(() => {
-    return slots.reduce((total, id) => {
-      if (!id) return total;
-
-      const variant = product.variants.find((v) => v.id === id);
-      return total + (variant?.price ?? 0);
-    }, 0);
-  }, [slots, product.variants]);
-
-  const currentUnitPrice = isPackage
-    ? selectedPackagePrice
+  const currentUnitPrice = isPackage && complete
+    ? packageUnitPrice(product.price, slots.map((id) => product.variants.find((v) => v.id === id)?.price))
     : product.price;
 
   function optionDisabled(slotIndex: number, v: Variant) {
@@ -177,18 +166,6 @@ export function AddToCart({ product }: Props) {
       toast.error(
         `Pilih semua ${product.packageSize} varian terlebih dahulu (${filled}/${product.packageSize} terpilih).`
       );
-      return;
-    }
-
-    // Pastikan seluruh varian paket memiliki harga.
-    if (
-      isPackage &&
-      slots.some((id) => {
-        const variant = product.variants.find((v) => v.id === id);
-        return !variant || !Number.isInteger(variant.price) || variant.price <= 0;
-      })
-    ) {
-      toast.error("Harga salah satu varian paket belum tersedia. Silakan coba lagi nanti.");
       return;
     }
 
@@ -350,7 +327,7 @@ export function AddToCart({ product }: Props) {
           <div className="mt-5 flex items-center justify-between border-t border-line pt-4">
             <span className="text-sm text-muted">Harga isi paket</span>
             <span className="font-bold text-espresso">
-              {formatRupiah(selectedPackagePrice)}
+              {formatRupiah(currentUnitPrice)}
             </span>
           </div>
         </div>

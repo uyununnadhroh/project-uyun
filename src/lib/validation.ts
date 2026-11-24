@@ -55,7 +55,7 @@ export const productSchema = z
     isPublished: z.boolean(),
     isFeatured: z.boolean(),
     trackStock: z.boolean(),
-    stock: z.union([z.coerce.number().int().min(0).max(100000), z.literal("")]).optional().transform((v) => (v === "" || v === undefined ? null : v)),
+    stock: z.union([z.literal(""), z.coerce.number().int().min(0).max(100000)]).optional().transform((v) => (v === "" || v === undefined ? null : v)),
     packageSize: z.union([z.coerce.number().int().min(1).max(50), z.literal("")]).optional().transform((v) => (v === "" || v === undefined ? null : v)),
     allowDuplicateVariants: z.boolean(),
     variantIds: z.array(z.string()).default([]),

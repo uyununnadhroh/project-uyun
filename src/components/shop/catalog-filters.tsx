@@ -1,80 +1,58 @@
 "use client";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
-import { Search, X, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+
+import { Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 
-export function CatalogFilters({ categories }: { categories: { name: string; slug: string }[] }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const sp = useSearchParams();
-  const [pending, start] = useTransition();
-  const [q, setQ] = useState(sp.get("q") ?? "");
+type CatalogFiltersProps = {
+  categories: { name: string; slug: string }[];
+  q: string;
+  category: string;
+  sort: string;
+  bestSeller: boolean;
+  availableOnly: boolean;
+};
 
-  function update(patch: Record<string, string | null>) {
-    const next = new URLSearchParams(sp.toString());
-    for (const [k, v] of Object.entries(patch)) v ? next.set(k, v) : next.delete(k);
-    start(() => router.replace(`${pathname}?${next.toString()}`, { scroll: false }));
-  }
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if ((sp.get("q") ?? "") !== q.trim()) update({ q: q.trim() || null });
-    }, 350);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
-
-  const cat = sp.get("kategori") ?? "";
-  const chip = (activeState: boolean) =>
-    cn("whitespace-nowrap rounded-full border px-4 py-2 text-sm font-medium transition", activeState ? "border-maroon bg-maroon text-cream" : "border-line bg-white text-espresso hover:border-caramel");
-
+export function CatalogFilters({ categories, q, category, sort, bestSeller, availableOnly }: CatalogFiltersProps) {
   return (
-    <div className="sticky top-16 z-30 -mx-4 mt-8 border-b border-line bg-cream/95 px-4 py-3 backdrop-blur sm:top-20 sm:mx-0 sm:rounded-2xl sm:border sm:bg-white sm:px-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="relative flex-1">
+    <form action="/menu" method="get" role="search" className="sticky top-16 z-30 -mx-4 mt-8 border-b border-line bg-cream/95 px-4 py-3 backdrop-blur sm:top-20 sm:mx-0 sm:rounded-2xl sm:border sm:bg-white">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-muted" />
           <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
+            name="q"
+            defaultValue={q}
+            maxLength={60}
             placeholder="Cari roti, paket, rasa…"
-            className="h-11 w-full rounded-full border border-line bg-white pr-10 pl-10 text-sm focus:border-caramel focus:ring-4 focus:ring-caramel/20 focus:outline-none"
+            className="h-11 w-full rounded-full border border-line bg-white pr-4 pl-10 text-sm focus:border-caramel focus:ring-4 focus:ring-caramel/20 focus:outline-none"
             aria-label="Cari produk"
           />
-          {pending ? (
-            <Loader2 className="absolute top-1/2 right-3.5 h-4 w-4 -translate-y-1/2 animate-spin text-muted" />
-          ) : q ? (
-            <button onClick={() => setQ("")} className="absolute top-1/2 right-3 -translate-y-1/2 rounded-full p-1 text-muted hover:bg-cream-200" aria-label="Hapus pencarian">
-              <X className="h-4 w-4" />
-            </button>
-          ) : null}
         </div>
-        <div className="flex gap-2">
-          <Select value={sp.get("urut") ?? ""} onChange={(e) => update({ urut: e.target.value || null })} className="h-11 rounded-full lg:w-48" aria-label="Urutkan">
-            <option value="">Urutkan: Default</option>
+        <div className="grid grid-cols-2 gap-2 lg:contents">
+          <Select name="kategori" defaultValue={category} onChange={(e) => e.currentTarget.form?.requestSubmit()} className="rounded-full" aria-label="Kategori produk">
+            <option value="">Semua Produk</option>
+            {categories.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+          </Select>
+          <Select name="urut" defaultValue={sort} onChange={(e) => e.currentTarget.form?.requestSubmit()} className="rounded-full" aria-label="Urutkan">
+            <option value="">Urutan default</option>
             <option value="price_asc">Harga termurah</option>
             <option value="price_desc">Harga termahal</option>
             <option value="bestseller">Terlaris</option>
             <option value="newest">Terbaru</option>
           </Select>
         </div>
+        <Button type="submit">Cari</Button>
       </div>
-      <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
-        <button className={chip(!cat)} onClick={() => update({ kategori: null })}>Semua</button>
-        {categories.map((c) => (
-          <button key={c.slug} className={chip(cat === c.slug)} onClick={() => update({ kategori: c.slug })}>
-            {c.name}
-          </button>
-        ))}
-        <span className="mx-1 my-1 w-px shrink-0 bg-line" />
-        <button className={chip(sp.get("terlaris") === "1")} onClick={() => update({ terlaris: sp.get("terlaris") === "1" ? null : "1" })}>
-          ★ Produk terlaris
-        </button>
-        <button className={chip(sp.get("tersedia") === "1")} onClick={() => update({ tersedia: sp.get("tersedia") === "1" ? null : "1" })}>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" name="terlaris" value="1" defaultChecked={bestSeller} onChange={(e) => e.currentTarget.form?.requestSubmit()} className="accent-maroon" />
+          Produk terlaris
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" name="tersedia" value="1" defaultChecked={availableOnly} onChange={(e) => e.currentTarget.form?.requestSubmit()} className="accent-maroon" />
           Hanya yang tersedia
-        </button>
+        </label>
       </div>
-    </div>
+    </form>
   );
 }

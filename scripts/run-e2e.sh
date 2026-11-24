@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
-# Menjalankan test E2E pada database TERPISAH (hakuu_bakery_test) agar data uji tidak masuk ke DB utama.
-# Prasyarat: PostgreSQL berjalan, user DB punya hak CREATEDB, `npm run build` sudah dijalankan,
-#            paket playwright + chromium tersedia.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . ./.env; set +a
-BASE_DB_URL="${DATABASE_URL%%\?*}"
-TEST_DB="${TEST_DB_NAME:-hakuu_bakery_test}"
-ADMIN_URL="${BASE_DB_URL%/*}/postgres"
-export DATABASE_URL="${BASE_DB_URL%/*}/${TEST_DB}?schema=public"
+set -a
+source "${E2E_ENV_FILE:-.env.test}"
+set +a
+
+# Reset hanya database lokal yang khusus untuk pengujian.
+node - <<'NODE'
+const db = new URL(process.env.DATABASE_URL ?? '');
+if (!['postgresql:', 'postgres:'].includes(db.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(db.hostname) || !/^\/[a-zA-Z0-9_]+_test$/.test(db.pathname)) {
+  throw new Error('Gunakan DATABASE_URL lokal dengan nama database berakhiran _test.');
+}
+NODE
+: "${SUPABASE_URL:?Isi URL project Supabase khusus pengujian}"
+: "${SUPABASE_SERVICE_ROLE_KEY:?Isi service role project Supabase khusus pengujian}"
 PORT="${TEST_PORT:-3100}"
 
-psql "$ADMIN_URL" -q -c "DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE)" -c "CREATE DATABASE ${TEST_DB}"
-rm -rf ./storage-test
-npx prisma migrate deploy >/dev/null
-npx tsx prisma/seed.ts >/dev/null
-npx tsx prisma/seed-demo.ts >/dev/null
+npx prisma migrate reset --force --skip-seed
+node --import tsx prisma/seed.ts
+node --import tsx prisma/seed-demo.ts
 
-STORAGE_DIR=./storage-test RATE_LIMIT_MULTIPLIER=100 npx next start -p "$PORT" > /tmp/hakuu-e2e-server.log 2>&1 &
+LOG="$(mktemp)"
+RATE_LIMIT_MULTIPLIER=100 ./node_modules/.bin/next start -H 127.0.0.1 -p "$PORT" > "$LOG" 2>&1 &
 SERVER=$!
-trap 'kill $SERVER 2>/dev/null || true' EXIT
-for i in $(seq 1 30); do curl -sf "http://localhost:$PORT/" >/dev/null && break; sleep 1; done
+trap 'kill "$SERVER" 2>/dev/null || true; rm -f "$LOG"' EXIT
+export BASE_URL="http://localhost:$PORT"
+for i in $(seq 1 30); do curl -sf "$BASE_URL/" >/dev/null && break; sleep 1; done
+if ! curl -sf "$BASE_URL/" >/dev/null; then cat "$LOG"; exit 1; fi
 
-BASE_URL="http://localhost:$PORT" npx tsx scripts/e2e-test.ts
+node --import tsx scripts/e2e-test.ts
