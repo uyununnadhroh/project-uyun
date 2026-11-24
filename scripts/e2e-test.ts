@@ -167,6 +167,30 @@ async function main() {
     await cust.reload();
     await cust.getByRole("heading", { name }).waitFor();
   });
+  await test("Tombol Unggulan menampilkan dan menghapus badge Best Seller per produk", async () => {
+    await admin.goto(`${BASE}/admin/produk`, { waitUntil: "networkidle" });
+    const toggle = admin.getByRole("row", { name: /Roti Cokelat/ }).getByRole("switch", { name: "Unggulan" });
+    await cust.goto(`${BASE}/menu?kategori=roti`, { waitUntil: "networkidle" });
+    const badgeFor = (name: string) => cust.locator("article")
+      .filter({ has: cust.getByRole("heading", { name, exact: true }) })
+      .getByText("Best Seller", { exact: true });
+    const featured = badgeFor("Roti Cokelat");
+    const other = badgeFor("Roti Keju");
+    assert(await featured.count() === 0, "badge muncul sebelum Unggulan diaktifkan");
+    await toggle.click();
+    const isFeatured = async () => (await prisma.product.findUniqueOrThrow({ where: { slug: "roti-cokelat" } })).isFeatured;
+    await until(isFeatured, "status Unggulan tersimpan");
+    await cust.reload();
+    await featured.waitFor({ state: "visible" });
+    assert(await other.count() === 0, "badge ikut muncul di produk lain");
+    await admin.reload({ waitUntil: "networkidle" });
+    assert(await toggle.getAttribute("aria-checked") === "true", "status Unggulan tidak tampil setelah halaman admin dimuat ulang");
+    await toggle.click();
+    await until(async () => !(await isFeatured()), "status Unggulan dinonaktifkan");
+    await cust.reload();
+    await cust.getByRole("heading", { name: "Roti Cokelat", exact: true }).waitFor();
+    assert(await featured.count() === 0, "badge masih muncul setelah Unggulan dinonaktifkan");
+  });
   await test("Buat paket dinamis isi 3 (tanpa duplikat) + upload foto", async () => {
     await admin.goto(`${BASE}/admin/produk/baru?tipe=PACKAGE`);
     await admin.locator("label:text-is('Nama paket') + input").fill("Paket Uji Isi 3");

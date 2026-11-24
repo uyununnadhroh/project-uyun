@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Star } from "lucide-react";
 import { formatRupiah } from "@/lib/utils";
 import { ProductImage } from "./product-image";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,7 @@ export type CardProduct = {
   imageUrl: string | null;
   categoryName: string;
   inStock: boolean;
+  isFeatured: boolean;
   sold?: number;
 };
 
@@ -36,7 +38,10 @@ export function ProductCard({ p, priority }: { p: CardProduct; priority?: boolea
         )}
       </Link>
       <div className="flex flex-1 flex-col p-4 sm:p-5">
-        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-caramel-dark">{p.categoryName}</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-caramel-dark">{p.categoryName}</p>
+          {p.isFeatured && <Badge tone="maroon"><Star aria-hidden="true" className="size-3" /> Best Seller</Badge>}
+        </div>
         <Link href={`/menu/${p.slug}`} className="mt-1">
           <h3 className="font-display text-lg leading-snug text-espresso transition group-hover:text-maroon">{p.name}</h3>
         </Link>
