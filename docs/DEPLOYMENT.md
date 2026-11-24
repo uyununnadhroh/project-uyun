@@ -2,7 +2,7 @@
 
 ## Konfigurasi Vercel
 
-Gunakan Node.js 24.x, preset Next.js, `npm ci` untuk instalasi, dan `npm run build` untuk build. Pastikan environment Preview dan Production masing-masing mengarah ke database dan proyek Storage yang sesuai. Lindungi Preview melalui Deployment Protection sebelum mencoba alur admin.
+Gunakan Node.js 24.x, preset Next.js, dan root repositori. `vercel.json` menetapkan `npm run build` tanpa menjalankan seed. Proyek Vercel yang dipakai adalah `hakuu-bakery-web` dari `uyununnadhroh/project-uyun` dengan production branch `main`. Project Supabase tujuan Production adalah `hakuu-bakery-web` (project ref `pafzryrwlvvpvytvddht`). Perubahan environment hanya berlaku pada deployment berikutnya.
 
 | Variabel | Isi |
 | --- | --- |
@@ -11,7 +11,7 @@ Gunakan Node.js 24.x, preset Next.js, `npm ci` untuk instalasi, dan `npm run bui
 | `SUPABASE_URL` | URL dasar proyek Supabase Storage, misalnya `https://<project-ref>.supabase.co`. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Kunci server dengan akses service role di proyek Storage tersebut. Simpan di environment Vercel tanpa prefiks `NEXT_PUBLIC_`. |
 
-`ADMIN_EMAIL` dan `ADMIN_PASSWORD` hanya diperlukan saat menjalankan `npm run db:seed`. Siapkan tabel pada database kosong dengan `npm run db:migrate` menggunakan koneksi migrasi. Jalankan migrasi `20261124083000_add_variant_package_price` di database Preview terlebih dahulu. Migrasi menambahkan kolom opsional `product_variants."packagePrice"` dan dapat dijalankan jika kolom INTEGER tersebut sudah dibuat melalui `prisma db push`. Terapkan di Production hanya setelah review dan verifikasi Preview. Data demo hanya untuk pengujian.
+`ADMIN_EMAIL` dan `ADMIN_PASSWORD` dipakai oleh seed awal yang dijalankan terpisah. Audit Production menemukan kolom opsional `product_variants."packagePrice"` sudah bertipe INTEGER dan tabel `_prisma_migrations` belum ada. Perbaikan ini dapat membaca kolom yang sudah ada. Untuk Production, buat baseline Prisma berdasarkan skema yang benar-benar aktif sebelum menjalankan migrasi berikutnya. Tinjau perbedaan skema dan siapkan backup sebelum mengubah riwayat migrasi.
 
 ## Supabase Storage
 
@@ -38,12 +38,16 @@ from pg_policies
 where schemaname = 'storage' and tablename = 'objects';
 ```
 
-## Verifikasi setelah Preview siap
+## Verifikasi
 
-1. Pilih environment **Preview** di Vercel dan gunakan database serta Storage yang khusus pengujian. Jika perlu, siapkan data dasar dan sebuah rekening uji di lingkungan tersebut.
+Preview saat ini bisa selesai build, tetapi runtime melaporkan bahwa `DATABASE_URL` belum tersedia. `SUPABASE_URL` dan `SUPABASE_SERVICE_ROLE_KEY` juga hanya tersedia di Production. Gunakan database uji lokal yang sudah tersedia dengan simulasi Storage untuk menguji operasi tulis. PR dapat di-review tanpa menyediakan proyek cloud tambahan.
+
+1. Jalankan `npm ci`, `npm run build`, `npm run typecheck`, lalu `npm run test:e2e` dengan fixture lokal. Audit Production dapat memeriksa katalog dan Runtime Logs secara baca saja.
 2. Simpan satu produk biasa, satu paket dengan varian aktif, dan satu draf. Cek panel admin dan katalog. Coba kategori di HP dan desktop sambil menggunakan pencarian.
 3. Coba harga isi paket dari menu **Admin → Varian Paket**. Jika semua varian yang dipilih memiliki harga, jumlah harga varian menjadi harga paket. Jika ada harga varian yang kosong, checkout memakai harga paket dari form produk, termasuk diskon paket jika ada.
 4. Buat pesanan transfer uji, unggah gambar JPG/PNG, lalu buka bukti dari **Admin → Pesanan → detail pesanan**. Uji lagi URL bukti dari browser tanpa sesi dan pastikan responsnya 403.
 5. Jika upload gagal, periksa Vercel Runtime Logs untuk POST `/api/orders/<nomor>/proof` atau POST Server Action pada `/admin/produk/baru`. Cari 413/`FUNCTION_PAYLOAD_TOO_LARGE`, pesan `[storage]` yang menyebut bucket, atau `[admin] database error` seperti Prisma P2021/P2022. Periksa nama dan scope variabel di **Settings → Environment Variables** dan redeploy Preview setelah perubahan.
 
 OCR berjalan setelah respons upload dengan data bahasa yang ikut dibundel. Jika log memuat `[ocr] gagal`, admin tetap bisa memeriksa bukti secara manual. Untuk produksi, gunakan backup database dan backup objek Storage.
+
+Setelah PR disetujui, pastikan deployment Production dari `main` membawa commit yang sudah di-review. Bila environment berubah, verifikasi deployment baru memakai pengaturan terbaru. Jika upload kecil masih gagal, gunakan waktu kejadian untuk mencocokkan Runtime Logs Vercel dengan respons Storage Supabase.
