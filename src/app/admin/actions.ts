@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import bcrypt from "bcryptjs";
 import { z, ZodError } from "zod";
-import type { OrderStatus } from "@prisma/client";
+import { Prisma, type OrderStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
@@ -24,7 +24,7 @@ import {
   savePublicImage,
 } from "@/lib/storage";
 import { saveSettings, type StoreSettings } from "@/lib/settings";
-import { ALLOWED_IMAGE_TYPES } from "@/lib/constants";
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/lib/constants";
 import { dateOnly, normalizePhone, slugify } from "@/lib/utils";
 
 export type ActionResult =
@@ -72,7 +72,16 @@ async function run(
       throw error;
     }
 
-    console.error(error);
+    if (error instanceof Prisma.PrismaClientKnownRequestError || error instanceof Prisma.PrismaClientInitializationError) {
+      const code = "code" in error ? error.code : error.errorCode;
+      console.error("[admin] database error", { code, kind: error.name });
+      if (code === "P2002") return { error: "Data tersebut sudah digunakan. Muat ulang halaman dan periksa daftar sebelum mencoba lagi." };
+      if (code === "P2003" || code === "P2025") return { error: "Data terkait sudah berubah atau tidak ditemukan. Muat ulang halaman dan coba lagi." };
+      if (code === "P2021" || code === "P2022") return { error: "Struktur database belum sesuai. Hubungi pengelola untuk memeriksa migrasi database." };
+      return { error: "Database gagal menyimpan perubahan. Coba lagi atau hubungi pengelola toko." };
+    }
+
+    console.error("[admin] action failed", { kind: error instanceof Error ? error.name : typeof error });
     return { error: "Terjadi kesalahan pada server." };
   }
 }
@@ -124,16 +133,19 @@ export async function saveProduct(
     const raw = JSON.parse(String(form.get("data") || "{}"));
     const data = productSchema.parse(raw);
 
-    const keepImages: string[] = JSON.parse(
-      String(form.get("keepImages") || "[]")
+    const keepImages = z.array(z.string()).parse(
+      JSON.parse(String(form.get("keepImages") || "[]"))
     );
 
     const files = form
       .getAll("images")
-      .filter((file): file is File => file instanceof File && file.size > 0);
+      .filter((file): file is File => file instanceof File);
 
     if (files.length > 8) {
       throw new UploadError("Maksimal 8 foto per upload.");
+    }
+    if (files.reduce((total, file) => total + file.size, 0) > MAX_UPLOAD_BYTES) {
+      throw new UploadError(`Total foto baru maksimal ${MAX_UPLOAD_LABEL} per penyimpanan. Kecilkan ukuran foto atau simpan dalam beberapa tahap.`);
     }
 
     const category = await prisma.category.findUnique({
@@ -145,15 +157,16 @@ export async function saveProduct(
     }
 
     if (data.type === "PACKAGE") {
-      const count = await prisma.productVariant.count({
+      const variants = await prisma.productVariant.findMany({
         where: { id: { in: data.variantIds } },
+        select: { isActive: true },
       });
-
-      if (count !== data.variantIds.length) {
-        throw new OrderError(
-          "Ada varian yang tidak valid.",
-          "variantIds"
-        );
+      if (variants.length !== data.variantIds.length) {
+        throw new OrderError("Ada varian yang tidak valid atau terpilih dua kali.", "variantIds");
+      }
+      const required = data.allowDuplicateVariants ? 1 : data.packageSize!;
+      if (data.isPublished && variants.filter((variant) => variant.isActive).length < required) {
+        throw new OrderError(`Pilih minimal ${required} varian aktif untuk paket yang dipublikasikan.`, "variantIds");
       }
     }
 
@@ -200,11 +213,7 @@ export async function saveProduct(
 
     try {
       for (const file of files) {
-        const result = await savePublicImage(
-          file,
-          "products",
-          ALLOWED_IMAGE_TYPES
-        );
+        const result = await savePublicImage(file, "products");
 
         uploaded.push(result.url);
       }
@@ -226,6 +235,7 @@ export async function saveProduct(
       const product = await prisma.$transaction(
         async (tx) => {
           let productId = id;
+          let retainedImages: string[] = [];
 
           if (productId) {
             const existing = await tx.product.findFirst({
@@ -245,9 +255,9 @@ export async function saveProduct(
               },
             });
 
-            removed = existing.images
-              .filter((image) => !keepImages.includes(image.url))
-              .map((image) => image.url);
+            const existingUrls = new Set(existing.images.map((image) => image.url));
+            retainedImages = [...new Set(keepImages)].filter((url) => existingUrls.has(url));
+            removed = [...existingUrls].filter((url) => !retainedImages.includes(url));
 
             await tx.productImage.deleteMany({
               where: { productId },
@@ -263,10 +273,7 @@ export async function saveProduct(
             productId = created.id;
           }
 
-          const urls = [
-            ...keepImages.filter((url) => !removed.includes(url)),
-            ...uploaded,
-          ];
+          const urls = [...retainedImages, ...uploaded];
 
           if (urls.length > 0) {
             await tx.productImage.createMany({
@@ -278,13 +285,15 @@ export async function saveProduct(
             });
           }
 
+          const variantIds = data.type === "PACKAGE" ? data.variantIds : [];
           await tx.productPackageOption.deleteMany({
-            where: { productId: productId! },
+            where: { productId: productId!, variantId: { notIn: variantIds } },
           });
 
-          if (data.type === "PACKAGE") {
+          if (variantIds.length) {
             await tx.productPackageOption.createMany({
-              data: data.variantIds.map((variantId) => ({
+              skipDuplicates: true,
+              data: variantIds.map((variantId) => ({
                 productId: productId!,
                 variantId,
               })),
@@ -452,6 +461,8 @@ const variantSchema = z.object({
     .min(2, "Nama varian minimal 2 karakter")
     .max(40),
   description: z.string().trim().max(200).optional().default(""),
+  packagePrice: z.union([z.literal(""), z.coerce.number().int().min(1, "Harga varian minimal Rp1").max(100_000_000)])
+    .optional().transform((value) => value === "" ? null : value),
   isActive: z.boolean().default(true),
   sortOrder: z.coerce.number().int().min(0).max(999).default(0),
 });
@@ -742,11 +753,7 @@ export async function uploadHeroImage(form: FormData) {
       throw new UploadError("Pilih gambar.");
     }
 
-    const { url } = await savePublicImage(
-      file,
-      "site",
-      ALLOWED_IMAGE_TYPES
-    );
+    const { url } = await savePublicImage(file, "site");
 
     await saveSettings({ heroImageUrl: url });
     await deleteByUrl(current);

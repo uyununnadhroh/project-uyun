@@ -9,7 +9,7 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/input";
 import { Alert } from "@/components/ui/misc";
-import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from "@/lib/constants";
+import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/lib/constants";
 import { cn, formatRupiah } from "@/lib/utils";
 
 type Variant = { id: string; name: string; isActive: boolean };
@@ -39,6 +39,7 @@ export function ProductForm({ initial, categories, variants: initialVariants }: 
   const [variants, setVariants] = useState(initialVariants);
   const [existing, setExisting] = useState<string[]>(initial.images);
   const [files, setFiles] = useState<{ file: File; url: string }[]>([]);
+  const [saveError, setSaveError] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [newVariant, setNewVariant] = useState("");
   const [pending, start] = useTransition();
@@ -52,19 +53,25 @@ export function ProductForm({ initial, categories, variants: initialVariants }: 
 
   function addFiles(list: FileList | null) {
     if (!list) return;
-    const next: { file: File; url: string }[] = [];
-    for (const f of Array.from(list)) {
-      if (!ALLOWED_IMAGE_TYPES.includes(f.type)) {
-        toast.error(`${f.name}: format harus JPG, PNG, atau WEBP`);
+    const next = [...files];
+    let total = files.reduce((sum, { file }) => sum + file.size, 0);
+    for (const file of Array.from(list)) {
+      if (next.length >= 8) {
+        toast.error("Maksimal 8 foto baru per penyimpanan.");
+        break;
+      }
+      if (!file.size || !ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        toast.error(`${file.name}: pilih gambar JPG, PNG, atau WEBP yang bisa dibuka.`);
         continue;
       }
-      if (f.size > MAX_UPLOAD_BYTES) {
-        toast.error(`${f.name}: ukuran maksimal 5 MB`);
+      if (total + file.size > MAX_UPLOAD_BYTES) {
+        toast.error(`${file.name}: total foto baru maksimal ${MAX_UPLOAD_LABEL} per penyimpanan.`);
         continue;
       }
-      next.push({ file: f, url: URL.createObjectURL(f) });
+      total += file.size;
+      next.push({ file, url: URL.createObjectURL(file) });
     }
-    setFiles((s) => [...s, ...next].slice(0, 8));
+    setFiles(next);
   }
 
   async function addVariant() {
@@ -95,16 +102,22 @@ export function ProductForm({ initial, categories, variants: initialVariants }: 
     fd.set("data", JSON.stringify(data));
     fd.set("keepImages", JSON.stringify(existing));
     files.forEach((f) => fd.append("images", f.file));
+    setSaveError("");
+    setErrors({});
     start(async () => {
-      const r = await saveProduct(fd);
-      if (!r.ok) {
-        setErrors(r.fields ?? {});
-        toast.error(r.error);
-        return;
+      try {
+        const result = await saveProduct(fd);
+        if (!result.ok) {
+          setErrors(result.fields ?? {});
+          setSaveError(result.error);
+          return;
+        }
+        toast.success(v.id ? "Produk diperbarui" : "Produk ditambahkan");
+        router.push("/admin/produk");
+        router.refresh();
+      } catch {
+        setSaveError(`Server tidak dapat menerima perubahan. Periksa koneksi dan pastikan total foto baru maksimal ${MAX_UPLOAD_LABEL}.`);
       }
-      toast.success(v.id ? "Produk diperbarui" : "Produk ditambahkan");
-      router.push("/admin/produk");
-      router.refresh();
     });
   }
 
@@ -220,7 +233,7 @@ export function ProductForm({ initial, categories, variants: initialVariants }: 
         )}
 
         <Card>
-          <CardHeader title="Foto produk" description="JPG, PNG, atau WEBP · maks 5 MB per foto · foto pertama menjadi cover" />
+          <CardHeader title="Foto produk" description={`JPG, PNG, atau WEBP · total foto baru maks ${MAX_UPLOAD_LABEL} per simpan · foto pertama menjadi cover`} />
           <div className="p-5">
             <input ref={fileInput} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
             <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
@@ -261,7 +274,7 @@ export function ProductForm({ initial, categories, variants: initialVariants }: 
             )}
           </div>
         </Card>
-        {Object.values(errors).some(Boolean) && <Alert tone="danger">Periksa kembali isian yang ditandai.</Alert>}
+        {saveError && <div role="alert"><Alert tone="danger">{saveError}</Alert></div>}
         <div className="flex gap-2">
           <Link href="/admin/produk" className={buttonClass("outline", "lg", "flex-1")}>Batal</Link>
           <Button type="submit" size="lg" className="flex-1" loading={pending}>Simpan</Button>

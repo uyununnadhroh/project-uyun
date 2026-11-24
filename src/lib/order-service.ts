@@ -14,6 +14,7 @@ import {
   dateOnly,
   effectivePrice,
   normalizePhone,
+  packageUnitPrice,
   todayWIB,
   ymd,
 } from "./utils";
@@ -77,7 +78,7 @@ export async function priceCart(
   const ids = [...new Set(items.map((i) => i.productId))];
 
   const products = await db.product.findMany({
-    where: { id: { in: ids }, deletedAt: null },
+    where: { id: { in: ids }, deletedAt: null, category: { isActive: true } },
     include: productInclude,
   });
 
@@ -197,34 +198,8 @@ export async function priceCart(
           variantName: allowed.get(vid)?.variant.name ?? "?",
         }));
 
-        // Harga hanya dihitung jika pilihan varian valid.
         if (selectionsValid) {
-          const selectedOptions = chosen.map(
-            (vid) => allowed.get(vid)!
-          );
-
-          const selectedPrices = selectedOptions.map(
-            (option) => option.variant.packagePrice
-          );
-
-          const hasInvalidPrice = selectedPrices.some(
-            (price) =>
-              price == null ||
-              !Number.isInteger(price) ||
-              price <= 0
-          );
-          if (hasInvalidPrice) {
-            error = error ?? "Harga varian paket belum diatur.";
-          } else {
-            const validPrices = selectedPrices.filter(
-              (price): price is number => price != null
-          );
-
-  unitPrice = validPrices.reduce(
-    (total, price) => total + price,
-    0
-  );
-          }
+          unitPrice = packageUnitPrice(unitPrice, chosen.map((id) => allowed.get(id)?.variant.packagePrice));
         }
       }
     }

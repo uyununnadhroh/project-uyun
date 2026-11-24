@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { formatRupiah } from "@/lib/utils";
 import { PageHeader } from "@/components/admin/shell";
 import { EntityManager } from "@/components/admin/entity-manager";
 import { deleteVariant, saveVariant } from "@/app/admin/actions";
@@ -14,15 +15,16 @@ export default async function VariantsPage() {
         title="Varian"
         addLabel="Tambah Varian"
         emptyTitle="Belum ada varian"
-        items={variants.map((v) => ({ id: v.id, name: v.name, description: v.description ?? "", isActive: v.isActive, sortOrder: v.sortOrder, packages: v._count.packageOptions, ordered: v._count.orderSelections }))}
-        columns={[{ key: "name", label: "Varian" }, { key: "packages", label: "Dipakai di paket" }, { key: "ordered", label: "Kali dipesan" }, { key: "sortOrder", label: "Urutan" }, { key: "isActive", label: "Status", render: "badge-active" }]}
+        items={variants.map((v) => ({ id: v.id, name: v.name, description: v.description ?? "", packagePrice: v.packagePrice, packagePriceText: v.packagePrice == null ? "—" : formatRupiah(v.packagePrice), isActive: v.isActive, sortOrder: v.sortOrder, packages: v._count.packageOptions, ordered: v._count.orderSelections }))}
+        columns={[{ key: "name", label: "Varian" }, { key: "packagePriceText", label: "Harga isi paket" }, { key: "packages", label: "Dipakai di paket" }, { key: "ordered", label: "Kali dipesan" }, { key: "sortOrder", label: "Urutan" }, { key: "isActive", label: "Status", render: "badge-active" }]}
         fields={[
           { name: "name", label: "Nama varian", required: true, placeholder: "Cokelat" },
           { name: "description", label: "Keterangan (opsional)" },
+          { name: "packagePrice", label: "Harga per varian (Rp)", type: "number", hint: "Opsional. Harga paket berlaku jika ada pilihan yang belum memiliki harga per varian." },
           { name: "sortOrder", label: "Urutan tampil", type: "number" },
           { name: "isActive", label: "Tersedia", type: "switch", hint: "Varian nonaktif tidak bisa dipilih customer di semua paket" },
         ]}
-        defaults={{ name: "", description: "", sortOrder: variants.length, isActive: true }}
+        defaults={{ name: "", description: "", packagePrice: "", sortOrder: variants.length, isActive: true }}
         onSave={saveVariant}
         onDelete={deleteVariant}
         deleteWarning="Varian akan dihapus dari semua paket. Riwayat pesanan tetap menyimpan nama varian. Untuk sementara, sebaiknya nonaktifkan saja."

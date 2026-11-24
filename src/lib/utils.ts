@@ -83,3 +83,13 @@ export function formatDateTime(date: Date | string) {
 export function effectivePrice(p: { price: number; discountPrice: number | null }) {
   return p.discountPrice != null && p.discountPrice > 0 && p.discountPrice < p.price ? p.discountPrice : p.price;
 }
+
+/** Gunakan harga paket ketika salah satu pilihan belum memiliki harga per varian. */
+export function packageUnitPrice(basePrice: number, variantPrices: (number | null | undefined)[]) {
+  let total = 0;
+  for (const price of variantPrices) {
+    if (price == null || !Number.isInteger(price) || price <= 0) return basePrice;
+    total += price;
+  }
+  return total || basePrice;
+}

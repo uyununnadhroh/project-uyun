@@ -27,7 +27,7 @@ async function test(name: string, fn: () => Promise<void>) {
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failures.push(name);
-    console.log(`  ✗ ${name}\n      ${(e as Error).message.split("\n")[0]}`);
+    console.log(`  ✗ ${name}\n      ${(e as Error).message.split("\n").slice(0, 5).join("\n      ")}`);
   }
 }
 async function until(fn: () => Promise<boolean>, msg: string, ms = 15000) {
@@ -79,11 +79,13 @@ async function adminLogin(page: Page) {
 async function main() {
   const fs = await import("fs");
   fs.mkdirSync(SHOTS, { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH });
   const adminCtx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   const admin = await adminCtx.newPage();
+  admin.setDefaultTimeout(10000);
   const custCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const cust = await custCtx.newPage();
+  cust.setDefaultTimeout(10000);
 
   const pkg4 = await prisma.product.findFirstOrThrow({ where: { slug: "paket-hemat-isi-4" } });
   const roti = await prisma.product.findFirstOrThrow({ where: { slug: "roti-keju" } });
@@ -144,6 +146,27 @@ async function main() {
     await admin.getByRole("button", { name: "Simpan" }).click();
     await admin.getByText("Harga diskon harus lebih kecil").first().waitFor();
   });
+  await test("Produk biasa tanpa foto tersimpan dan muncul setelah publikasi", async () => {
+    const name = "Roti Uji Publikasi";
+    await admin.goto(`${BASE}/admin/produk/baru`);
+    await admin.getByPlaceholder("Roti Cokelat").fill(name);
+    await admin.locator("select").first().selectOption({ label: "Roti" });
+    await admin.getByPlaceholder("25000").fill("9000");
+    await admin.getByRole("switch", { name: /Publikasi/ }).click();
+    await admin.getByRole("button", { name: "Simpan", exact: true }).click();
+    await admin.waitForURL(`${BASE}/admin/produk`);
+    await admin.getByText(name, { exact: true }).first().waitFor();
+    const product = await prisma.product.findUniqueOrThrow({ where: { slug: "roti-uji-publikasi" } });
+    assert(!product.isPublished, "produk draf terpublikasi");
+    await cust.goto(`${BASE}/menu?q=Roti+Uji+Publikasi`, { waitUntil: "networkidle" });
+    await cust.getByRole("heading", { name: "Produk tidak ditemukan", exact: true }).first().waitFor();
+    await admin.goto(`${BASE}/admin/produk/${product.id}`);
+    await admin.getByRole("switch", { name: /Publikasi/ }).click();
+    await admin.getByRole("button", { name: "Simpan", exact: true }).click();
+    await admin.waitForURL(`${BASE}/admin/produk`);
+    await cust.reload();
+    await cust.getByRole("heading", { name }).waitFor();
+  });
   await test("Buat paket dinamis isi 3 (tanpa duplikat) + upload foto", async () => {
     await admin.goto(`${BASE}/admin/produk/baru?tipe=PACKAGE`);
     await admin.locator("label:text-is('Nama paket') + input").fill("Paket Uji Isi 3");
@@ -172,9 +195,60 @@ async function main() {
     assert(names[0] === "Paket Hemat Isi 4", `urutan: ${names.join(",")}`);
     assert(!names.includes("Roti Keju"), "filter kategori gagal");
   });
+  for (const width of [390, 1280]) {
+    await test(`Katalog ${width}px: pencarian, kategori, reset, dan hasil kosong`, async () => {
+      const page = await custCtx.newPage();
+      await page.setViewportSize({ width, height: 844 });
+      page.setDefaultTimeout(10000);
+      try {
+        await page.goto(`${BASE}/menu`, { waitUntil: "networkidle" });
+        const category = page.getByRole("combobox", { name: "Kategori produk" });
+        const search = page.getByRole("textbox", { name: "Cari produk" });
+        await search.fill("keju");
+        await category.selectOption({ label: "Paket Hemat" });
+        await page.waitForURL((url) => url.searchParams.get("kategori") === "paket-hemat" && url.searchParams.get("q") === "keju", { waitUntil: "networkidle" });
+        await page.getByRole("heading", { name: "Paket Hemat", exact: true }).waitFor();
+        await page.getByRole("heading", { name: "Produk tidak ditemukan", exact: true }).first().waitFor();
+        assert(await search.inputValue() === "keju", "kategori menghilangkan kata kunci");
+        await category.selectOption({ label: "Semua Produk" });
+        await page.waitForURL((url) => !url.searchParams.get("kategori") && url.searchParams.get("q") === "keju", { waitUntil: "networkidle" });
+        await page.getByRole("heading", { name: "Roti Keju" }).waitFor();
+        assert(await search.inputValue() === "keju", "reset kategori menghilangkan kata kunci");
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "filter melebar keluar layar");
+        await search.fill("tidak-ada-hakuu");
+        await page.getByRole("button", { name: "Cari", exact: true }).click();
+        await page.getByRole("heading", { name: "Produk tidak ditemukan", exact: true }).first().waitFor();
+      } finally {
+        await page.close();
+      }
+    });
+  }
+  await test("Harga per varian bisa diatur admin dan digunakan oleh checkout", async () => {
+    const chocolate = variants.find((v) => v.name === "Cokelat")!;
+    await admin.goto(`${BASE}/admin/varian`);
+    const row = admin.getByRole("row", { name: /Cokelat/ });
+    const edit = () => row.getByRole("button", { name: "Edit" }).click();
+    const price = admin.getByRole("dialog").locator("label", { hasText: "Harga per varian" }).locator("xpath=following-sibling::input");
+    const save = () => admin.getByRole("dialog").getByRole("button", { name: "Simpan" }).click();
+    await edit();
+    await price.fill("13000");
+    await save();
+    await admin.getByRole("dialog").waitFor({ state: "hidden" });
+    try {
+      const quote = await api(null, "POST", "/api/cart/quote", { items: [{ productId: pkg4.id, quantity: 1, variants: Array(4).fill(chocolate.id) }] });
+      assert(quote.json.subtotal === 52000 && quote.json.hasError === false, "harga varian tidak dipakai");
+      const mixed = await api(null, "POST", "/api/cart/quote", { items: [{ productId: pkg4.id, quantity: 1, variants: [chocolate.id, chocolate.id, chocolate.id, variants.find((v) => v.name === "Keju")!.id] }] });
+      assert(mixed.json.subtotal === 48000 && mixed.json.hasError === false, "harga paket tidak dipakai untuk varian tanpa harga");
+    } finally {
+      await edit();
+      await price.fill("");
+      await save();
+      await admin.getByRole("dialog").waitFor({ state: "hidden" });
+    }
+  });
   await test("Paket isi 4: wajib memilih semua varian sebelum ditambahkan", async () => {
-    await cust.goto(`${BASE}/menu/paket-hemat-isi-4`);
-    assert((await cust.locator("select[id^=slot-]").count()) === 4, "slot bukan 4");
+    await cust.goto(`${BASE}/menu/paket-hemat-isi-4`, { waitUntil: "networkidle" });
+    assert((await cust.locator("select[id^=slot-]:visible").count()) === 4, "slot bukan 4");
     await cust.getByRole("button", { name: "Tambahkan ke Keranjang" }).click();
     await cust.getByText(/Pilih semua 4 varian/).waitFor();
     const picks = ["Cokelat", "Cokelat", "Keju", "Abon"];
@@ -184,16 +258,16 @@ async function main() {
   });
   await test("Paket tanpa duplikat: varian yang sudah dipilih dinonaktifkan", async () => {
     const p = await prisma.product.findFirstOrThrow({ where: { name: "Paket Uji Isi 3" } });
-    await cust.goto(`${BASE}/menu/${p.slug}`);
+    await cust.goto(`${BASE}/menu/${p.slug}`, { waitUntil: "networkidle" });
     await cust.selectOption("#slot-0", { label: "Cokelat" });
     const coklat = variants.find((v) => v.name === "Cokelat")!;
-    const disabled = await cust.locator(`#slot-1 option[value="${coklat.id}"]`).isDisabled();
+    const disabled = await cust.locator(`#slot-1:visible option[value="${coklat.id}"]`).isDisabled();
     assert(disabled, "opsi duplikat tidak dinonaktifkan");
   });
   await test("Tambah produk biasa & ubah jumlah di keranjang", async () => {
-    await cust.goto(`${BASE}/menu/roti-keju`);
+    await cust.goto(`${BASE}/menu/roti-keju`, { waitUntil: "networkidle" });
     await cust.getByRole("button", { name: "Tambahkan ke Keranjang" }).click();
-    await cust.goto(`${BASE}/keranjang`);
+    await cust.goto(`${BASE}/keranjang`, { waitUntil: "networkidle" });
     await cust.getByText("1. Cokelat").waitFor();
     await cust.getByRole("button", { name: "Tambah" }).nth(1).click(); // roti keju jadi 2
     await cust.getByText("Rp24.000").first().waitFor(); // 2 x 12.000 (harga diskon)
@@ -217,7 +291,7 @@ async function main() {
   let transferOrder = "";
   console.log("\n▶ Checkout Transfer + bukti + OCR + verifikasi");
   await test("Checkout delivery + transfer via UI", async () => {
-    await cust.goto(`${BASE}/checkout`);
+    await cust.goto(`${BASE}/checkout`, { waitUntil: "networkidle" });
     await cust.fill("#name", "E2E Budi Santoso");
     await cust.fill("#phone", "081299990001");
     await cust.getByRole("button", { name: /Delivery/ }).click();
@@ -257,6 +331,13 @@ async function main() {
     const r = await fetch(`${BASE}/api/orders/${transferOrder}/proof`, { method: "POST", body: fd, headers: { cookie } });
     assert(r.status === 422, `status ${r.status}`);
   });
+  await test("Upload bukti melebihi 4 MiB ditolak dengan pesan ukuran", async () => {
+    const file = { name: "besar.png", mimeType: "image/png", buffer: Buffer.alloc(4 * 1024 * 1024 + 1) };
+    await cust.locator("input[type=file]").setInputFiles(file);
+    await cust.getByRole("alert").filter({ hasText: "4 MiB" }).waitFor();
+    const response = await custCtx.request.post(`${BASE}/api/orders/${transferOrder}/proof`, { multipart: { file } });
+    assert(response.status() === 413 && (await response.json()).error.includes("4 MiB"), `status ${response.status()}`);
+  });
   await test("Upload bukti transfer dengan preview → Menunggu Verifikasi", async () => {
     await cust.locator("input[type=file]").setInputFiles(await proofImage("Rp 80.000"));
     await cust.getByAltText("Preview bukti transfer").waitFor();
@@ -278,8 +359,19 @@ async function main() {
   });
   await test("Bukti privat: tidak bisa diakses tanpa hak", async () => {
     const proof = await prisma.paymentProof.findFirstOrThrow({ where: { payment: { order: { orderNumber: transferOrder } } } });
-    const r = await fetch(`${BASE}/api/files/${proof.filePath}`);
+    const fileUrl = `${BASE}/api/files/${proof.filePath}`;
+    const r = await fetch(fileUrl);
     assert(r.status === 403, `status ${r.status}`);
+    for (const context of [custCtx, adminCtx]) {
+      const response = await context.request.get(fileUrl);
+      assert(response.ok() && response.headers()["cache-control"] === "private, no-store", "bukti tidak terbaca secara privat");
+      assert((await response.body()).subarray(0, 4).toString("hex") === "89504e47", "isi bukti bukan PNG");
+    }
+    const order = await prisma.order.findUniqueOrThrow({ where: { orderNumber: transferOrder } });
+    await admin.goto(`${BASE}/admin/pesanan/${order.id}`);
+    const image = admin.getByAltText("Bukti transfer", { exact: true }).first();
+    await image.waitFor();
+    await until(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth > 0), "admin dapat melihat bukti pada pesanan yang benar");
   });
   await test("Admin menolak bukti (alasan wajib) → customer bisa unggah ulang", async () => {
     await admin.goto(`${BASE}/admin/verifikasi`);
@@ -416,10 +508,10 @@ async function main() {
     const after = await api(null, "GET", "/api/checkout/options");
     const d = (after.json.days as { date: string; remaining: number }[]).find((x) => x.date === day.date)!;
     assert(d.remaining === 1, `remaining ${d.remaining}`);
-    await cust.goto(`${BASE}/menu/roti-keju`);
+    await cust.goto(`${BASE}/menu/roti-keju`, { waitUntil: "networkidle" });
     await cust.getByRole("button", { name: "Tambahkan ke Keranjang" }).click();
     await cust.getByRole("button", { name: "Tambahkan ke Keranjang" }).click();
-    await cust.goto(`${BASE}/checkout`);
+    await cust.goto(`${BASE}/checkout`, { waitUntil: "networkidle" });
     const dt = new Date(`${day.date}T00:00:00Z`).getUTCDate();
     const btn = cust.locator("button[disabled]", { hasText: "Sisa 1" }).filter({ hasText: String(dt) });
     await btn.first().waitFor();

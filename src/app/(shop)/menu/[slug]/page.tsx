@@ -71,7 +71,7 @@ export default async function ProductPage({ params }: { params: Params }) {
                   id: o.variant.id,
                   name: o.variant.name,
                   max: o.maxPerPackage,
-                  price: o.variant.packagePrice ?? 0,
+                  price: o.variant.packagePrice,
                 })),
 
               }}

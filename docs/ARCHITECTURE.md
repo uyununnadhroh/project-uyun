@@ -15,8 +15,8 @@ Kebutuhan non-fungsional: responsif (mobile-first), harga divalidasi server, upl
 |---|---|---|
 | Frontend + backend | **Next.js 15 App Router** | Satu codebase; Server Components untuk halaman cepat, Route Handlers untuk API customer, Server Actions untuk mutasi admin |
 | Database | **PostgreSQL + Prisma** | Relasional, transaksi & advisory lock untuk kapasitas; skema bisa langsung dipakai di **Supabase** (Supabase = Postgres) |
-| Auth | **Sesi JWT (jose) di cookie httpOnly + bcrypt** | Dipilih *alih-alih* Supabase Auth agar aplikasi dapat berjalan 100% lokal tanpa akun pihak ketiga. Hanya admin yang login; customer diverifikasi lewat nomor pesanan + WhatsApp (cookie bertanda tangan) |
-| Storage | **Disk lokal (modul `lib/storage.ts`)** | Berjalan offline. Bukti transfer disimpan privat & disajikan lewat route yang memeriksa hak akses. Modul dapat diganti Supabase Storage/S3 tanpa mengubah pemanggil |
+| Auth | **Sesi JWT (jose) di cookie httpOnly + bcrypt** | Sesi dikelola oleh aplikasi. Hanya admin yang login; customer diverifikasi lewat nomor pesanan + WhatsApp (cookie bertanda tangan) |
+| Storage | **Supabase Storage (modul `lib/storage.ts`)** | Foto katalog di `product-images`. Bukti di bucket privat `payment-proofs` dan dibaca lewat route yang memeriksa hak akses. |
 | UI | Tailwind CSS v4 + komponen sendiri bergaya shadcn | Identitas visual Hakuu (maroon #4D0C14, light brown #DBA179, brown #7E4722, krem) tanpa tampilan template generik |
 | Chart | Recharts | Grafik dashboard & laporan |
 | Export | ExcelJS, jsPDF + autotable, halaman cetak | Excel, PDF, dan print browser |
@@ -39,7 +39,7 @@ flowchart LR
     MW[middleware: proteksi /admin]
   end
   DB[(PostgreSQL)]
-  FS[(storage/<br/>products · site · proofs)]
+  FS[(Supabase Storage<br/>product-images · payment-proofs)]
   OCR[[Tesseract.js<br/>background after()]]
   WA[[wa.me Click-to-Chat]]
   C --> RH --> SVC
