@@ -569,12 +569,67 @@ async function main() {
 
   console.log("\n▶ Responsive");
   await test("Tampilan mobile (iPhone) tanpa scroll horizontal", async () => {
-    const m = await (await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true })).newPage();
-    for (const [url, name] of [["/", "m-home"], ["/menu", "m-menu"], ["/menu/paket-hemat-isi-4", "m-package"], ["/checkout", "m-checkout"]]) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true });
+    const m = await context.newPage();
+    for (const [url, name] of [["/", "m-home"], ["/menu", "m-menu"], ["/menu/paket-hemat-isi-4", "m-package"]]) {
       await m.goto(BASE + url, { waitUntil: "networkidle" });
-      const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      const overflow = await m.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       assert(overflow <= 1, `${url} overflow ${overflow}px`);
       await m.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
+    }
+    await context.close();
+  });
+
+  await test("Checkout berisi produk muat di HP, tablet, dan desktop", async () => {
+    for (const width of [320, 390, 768, 1280]) {
+      const mobile = width < 640;
+      const context = await browser.newContext({ viewport: { width, height: 760 }, isMobile: mobile, hasTouch: mobile });
+      try {
+        await context.addInitScript((cart) => localStorage.setItem("hakuu_cart_v1", JSON.stringify(cart)), [
+          { productId: roti.id, quantity: 2, variants: [] },
+          { productId: pkg4.id, quantity: 1, variants: [variants[0].id, variants[0].id, variants[1].id, variants[2].id] },
+        ]);
+        const page = await context.newPage();
+        page.setDefaultTimeout(10000);
+        await page.goto(`${BASE}/checkout`);
+        const summary = page.getByRole("complementary").filter({ has: page.getByRole("heading", { name: "Ringkasan Pesanan" }) });
+        await summary.getByText("Rp72.000").last().waitFor();
+        const dates = page.getByRole("group", { name: "Tanggal pengambilan atau pengiriman" });
+        const formColumn = await page.locator("section").filter({ has: page.getByRole("heading", { name: "Data Diri" }) }).boundingBox();
+        const summaryBox = await summary.boundingBox();
+        assert(formColumn && summaryBox, `Formulir atau ringkasan tidak terlihat pada ${width}px`);
+        if (width < 1024) {
+          assert(summaryBox.x === formColumn.x && summaryBox.y > formColumn.y, `Ringkasan harus di bawah formulir pada ${width}px`);
+        } else {
+          assert(summaryBox.x >= formColumn.x + formColumn.width, "Ringkasan harus di samping formulir pada desktop");
+        }
+        const date = dates.getByRole("button").and(dates.locator("button:enabled")).last();
+        const hasDateOverflow = await dates.evaluate((el) => el.scrollWidth > el.clientWidth);
+        assert(hasDateOverflow, `Daftar tanggal harus bisa digulir pada ${width}px`);
+        await date.click();
+        assert(await date.getAttribute("aria-pressed") === "true", "Tanggal di ujung daftar tidak terpilih");
+        const time = page.getByRole("button", { name: "08:00 - 10:00" });
+        await time.click();
+        assert(await time.getAttribute("aria-pressed") === "true", "Jam tidak terpilih");
+        await page.getByRole("button", { name: /Delivery/ }).click();
+        await page.locator("#addr").fill("Jl. Uji Checkout Mobile No. 10, Lamongan");
+        await page.getByRole("button", { name: /Transfer Bank/ }).click();
+        await page.getByRole("radio", { name: /BANK UJI/ }).check();
+        await summary.getByText("Rp82.000").last().waitFor();
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        assert(overflow <= 1, `Checkout pada ${width}px overflow ${overflow}px`);
+        const submit = page.getByRole("button", { name: "Buat Pesanan" });
+        await submit.click({ trial: true });
+        if (width === 390) {
+          await page.screenshot({ path: path.join(SHOTS, "m-checkout.png"), fullPage: true });
+          await page.locator("#name").fill("E2E Checkout Mobile");
+          await page.locator("#phone").fill("081299990002");
+          await submit.click();
+          await page.waitForURL(/\/pesanan\/HKU-/);
+        }
+      } finally {
+        await context.close();
+      }
     }
   });
 
