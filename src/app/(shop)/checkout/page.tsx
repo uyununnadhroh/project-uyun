@@ -33,9 +33,9 @@ const PROFILE_KEY = "hakuu_profile";
 
 function Section({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-3xl border border-line bg-white p-5 shadow-soft sm:p-7">
+    <section className="rounded-3xl border border-line bg-white p-4 shadow-soft sm:p-7">
       <h2 className="flex items-center gap-3 font-display text-xl text-maroon">
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-cream-200 font-sans text-sm font-bold">{n}</span>
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-cream-200 font-sans text-sm font-bold">{n}</span>
         {title}
       </h2>
       <div className="mt-5">{children}</div>
@@ -190,8 +190,8 @@ export default function CheckoutPage() {
       </Link>
       <h1 className="mt-4 text-4xl text-maroon sm:text-5xl">Checkout</h1>
 
-      <div className="mt-8 grid items-start gap-6 lg:grid-cols-3 lg:gap-8">
-        <div className="space-y-5 lg:col-span-2">
+      <div className="mt-8 grid grid-cols-1 items-start gap-6 lg:grid-cols-3 lg:gap-8">
+        <div className="min-w-0 space-y-5 lg:col-span-2">
           <Section n={1} title="Data Diri">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Nama lengkap" htmlFor="name" required error={errors.customerName}>
@@ -219,7 +219,7 @@ export default function CheckoutPage() {
             {form.fulfillmentMethod === "PICKUP" && (
               <div className="mt-4 flex gap-3 rounded-2xl bg-cream-100 p-4 text-sm">
                 <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-brown" />
-                <div>
+                <div className="min-w-0 [overflow-wrap:anywhere]">
                   <p className="font-semibold">Alamat pengambilan</p>
                   <p className="mt-0.5 whitespace-pre-line text-muted">{o.pickupAddress || "Alamat toko akan dikonfirmasi oleh admin melalui WhatsApp."}</p>
                   {o.pickupInstructions && <p className="mt-2 text-xs text-muted">{o.pickupInstructions}</p>}
@@ -241,7 +241,7 @@ export default function CheckoutPage() {
 
           <Section n={3} title="Jadwal Pengambilan / Pengiriman">
             <p className="mb-3 text-sm text-muted">Pilih tanggal. Kapasitas produksi harian kami terbatas — tanggal yang penuh tidak dapat dipilih.</p>
-            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2" data-error={!!errors.scheduledDate}>
+            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2" role="group" aria-label="Tanggal pengambilan atau pengiriman" data-error={!!errors.scheduledDate}>
               {o.days.map((d) => {
                 const st = dayState(d);
                 const active = form.scheduledDate === d.date;
@@ -251,6 +251,7 @@ export default function CheckoutPage() {
                     key={d.date}
                     type="button"
                     disabled={st.disabled}
+                    aria-pressed={active}
                     onClick={() => set("scheduledDate", d.date)}
                     className={cn(
                       "flex w-[4.6rem] shrink-0 flex-col items-center rounded-2xl border-2 px-2 py-2.5 transition",
@@ -273,7 +274,7 @@ export default function CheckoutPage() {
             <p className="mt-5 mb-2 text-sm font-semibold">Waktu {form.fulfillmentMethod === "DELIVERY" ? "pengiriman" : "pengambilan"} <span className="text-red-600">*</span></p>
             <div className="flex flex-wrap gap-2" data-error={!!errors.scheduledTime}>
               {o.timeSlots.map((t) => (
-                <button key={t} type="button" onClick={() => set("scheduledTime", t)} className={cn("rounded-full border-2 px-4 py-2 text-sm font-medium transition", form.scheduledTime === t ? "border-maroon bg-maroon text-cream" : "border-line hover:border-caramel")}>
+                <button key={t} type="button" aria-pressed={form.scheduledTime === t} onClick={() => set("scheduledTime", t)} className={cn("min-h-11 rounded-full border-2 px-4 py-2 text-sm font-medium transition", form.scheduledTime === t ? "border-maroon bg-maroon text-cream" : "border-line hover:border-caramel")}>
                   {t}
                 </button>
               ))}
@@ -295,8 +296,8 @@ export default function CheckoutPage() {
                 <p className="text-sm font-semibold">Pilih rekening tujuan</p>
                 {o.banks.map((b) => (
                   <label key={b.id} className={cn("flex cursor-pointer items-center gap-3 rounded-2xl border-2 p-3.5 transition", form.bankAccountId === b.id ? "border-maroon bg-maroon-50" : "border-line hover:border-caramel")}>
-                    <input type="radio" name="bank" className="accent-maroon" checked={form.bankAccountId === b.id} onChange={() => set("bankAccountId", b.id)} />
-                    <span className="text-sm">
+                    <input type="radio" name="bank" className="shrink-0 accent-maroon" checked={form.bankAccountId === b.id} onChange={() => set("bankAccountId", b.id)} />
+                    <span className="min-w-0 text-sm [overflow-wrap:anywhere]">
                       <span className="font-bold">{b.bankName}</span> · {b.accountNumber}
                       <span className="block text-xs text-muted">a.n. {b.accountHolder}</span>
                     </span>
@@ -309,12 +310,12 @@ export default function CheckoutPage() {
           </Section>
         </div>
 
-        <aside className="rounded-3xl border border-line bg-white p-6 shadow-soft lg:sticky lg:top-28">
+        <aside className="min-w-0 rounded-3xl border border-line bg-white p-4 shadow-soft sm:p-6 lg:sticky lg:top-28">
           <h2 className="font-display text-2xl text-maroon">Ringkasan Pesanan</h2>
           <ul className="mt-5 space-y-3 border-b border-line pb-5 text-sm">
             {quote?.lines.map((l) => (
               <li key={l.key} className="flex justify-between gap-3">
-                <div className="min-w-0">
+                <div className="min-w-0 [overflow-wrap:anywhere]">
                   <p className="font-semibold">
                     {l.productName} <span className="font-normal text-muted">×{l.quantity}</span>
                   </p>
@@ -331,7 +332,7 @@ export default function CheckoutPage() {
               <div className="flex justify-between"><dt className="text-muted">Ongkos kirim</dt><dd>{deliveryFee > 0 ? formatRupiah(deliveryFee) : "Gratis / sesuai ketentuan"}</dd></div>
             )}
           </dl>
-          <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
+          <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-3 border-t border-line pt-4">
             <span className="font-semibold">Total</span>
             <span className="text-2xl font-bold text-maroon">{formatRupiah(total)}</span>
           </div>
